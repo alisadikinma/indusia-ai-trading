@@ -74,3 +74,6 @@ Desktop.ini
 # Local memory dirs that grow during operation
 claude-routines/memory/.cache/
 claude-routines/memory/*.tmp
+
+# Phase 2: Binance Vision download cache (regeneratable; do not commit)
+infra/data_loader/.cache/

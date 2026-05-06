@@ -8,9 +8,12 @@ requires-python = ">=3.12"
 authors = [{ name = "Ali Sadikin", email = "ali.sadikincom85@gmail.com" }]
 
 dependencies = [
-    # Top-level project deps live in the per-component pyproject inside
-    # pulse-bridge/ and infra/. The root project pulls in only the dev
-    # toolchain so a `pip install -e .[dev]` at the root gives the test runner.
+    # Phase 2 — data ingestion runtime deps. These are needed by the
+    # `infra/data_loader/*` modules and their tests.
+    "httpx[http2]>=0.27",
+    "polars>=1.0",
+    "websockets>=13",
+    "psycopg[binary]>=3.2",
 ]
 
 [project.optional-dependencies]
