@@ -1,0 +1,5 @@
+{
+  "username": "test-operator",
+  "password": "test-password-only-for-e2e",
+  "argon2Hash": "$argon2id$v=19$m=65536,t=3,p=4$c9PDX1eV5e88JEyMbCnoww$eN3CUWx9HuI/VliyIGsJ7TgcobLqver7r3+H2PiP1g8"
+}
