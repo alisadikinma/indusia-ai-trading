@@ -1,0 +1,32 @@
+[Unit]
+Description=AI Trading 24/7 — Dashboard read-only API (FastAPI under uvicorn)
+Documentation=file:///opt/ai-trading/docs/plans/2026-05-06-ai-trading-247.md
+After=docker.service network-online.target pulse-bridge.service
+Wants=network-online.target pulse-bridge.service
+
+[Service]
+Type=simple
+User=trader
+Group=trader
+WorkingDirectory=/opt/ai-trading/pulse-bridge
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=/opt/ai-trading/.env
+ExecStart=/opt/ai-trading/.venv/bin/uvicorn pulse_bridge.dashboard_main:app \
+    --host 127.0.0.1 \
+    --port 8081 \
+    --workers 1 \
+    --log-level info
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+LimitNOFILE=65536
+MemoryMax=512M
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

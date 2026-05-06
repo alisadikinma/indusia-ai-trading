@@ -1,0 +1,34 @@
+[Unit]
+Description=AI Trading 24/7 — PULSE bridge (Claude ↔ Freqtrade FastAPI shim)
+Documentation=file:///opt/ai-trading/docs/plans/2026-05-06-ai-trading-247.md
+After=docker.service network-online.target postgres-init.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=trader
+Group=trader
+WorkingDirectory=/opt/ai-trading/pulse-bridge
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=/opt/ai-trading/.env
+ExecStart=/opt/ai-trading/.venv/bin/uvicorn pulse_bridge.main:app \
+    --uds /run/pulse/pulse.sock \
+    --workers 1 \
+    --log-level info
+Restart=always
+RestartSec=5
+RuntimeDirectory=pulse
+RuntimeDirectoryMode=0750
+StandardOutput=journal
+StandardError=journal
+LimitNOFILE=65536
+MemoryMax=512M
+
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

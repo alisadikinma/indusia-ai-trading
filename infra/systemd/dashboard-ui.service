@@ -1,0 +1,32 @@
+[Unit]
+Description=AI Trading 24/7 — Bot Cockpit UI (Next.js standalone)
+Documentation=file:///opt/ai-trading/docs/plans/2026-05-06-ai-trading-247.md
+After=network-online.target dashboard-api.service
+Wants=network-online.target dashboard-api.service
+
+[Service]
+Type=simple
+User=trader
+Group=trader
+WorkingDirectory=/opt/ai-trading/dashboard-ui
+Environment=NODE_ENV=production
+Environment=PORT=3000
+# 127.0.0.1 only — UI is reachable from operator devices via Tailscale,
+# never directly from the public internet.
+Environment=HOST=127.0.0.1
+EnvironmentFile=/opt/ai-trading/.env
+ExecStart=/usr/bin/node /opt/ai-trading/dashboard-ui/.next/standalone/server.js
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+LimitNOFILE=65536
+MemoryMax=768M
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

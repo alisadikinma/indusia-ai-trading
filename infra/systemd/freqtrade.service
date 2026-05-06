@@ -1,0 +1,35 @@
+[Unit]
+Description=AI Trading 24/7 — Freqtrade execution body
+Documentation=file:///opt/ai-trading/docs/plans/2026-05-06-ai-trading-247.md
+After=docker.service network-online.target
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=simple
+User=trader
+Group=trader
+WorkingDirectory=/opt/ai-trading/freqtrade-fork
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=/opt/ai-trading/.env
+ExecStart=/opt/ai-trading/.venv/bin/freqtrade trade \
+    --config /opt/ai-trading/freqtrade-fork/user_data/config.json \
+    --strategy ClaudeOversightStrategy \
+    --logfile /opt/ai-trading/logs/freqtrade.log
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+# Resource limits — keep us within Hetzner CX22's 4GB RAM
+LimitNOFILE=65536
+MemoryMax=2G
+
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/ai-trading/freqtrade-fork/user_data /opt/ai-trading/logs
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
