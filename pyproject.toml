@@ -1,0 +1,63 @@
+[project]
+name = "ai-trading-247"
+version = "0.0.1"
+description = "24/7 autonomous AI crypto trading agent — Claude Code CLI brain over forked Freqtrade body"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.12"
+authors = [{ name = "Ali Sadikin", email = "ali.sadikincom85@gmail.com" }]
+
+dependencies = [
+    # Top-level project deps live in the per-component pyproject inside
+    # pulse-bridge/ and infra/. The root project pulls in only the dev
+    # toolchain so a `pip install -e .[dev]` at the root gives the test runner.
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3.0",
+    "pytest-asyncio>=0.24.0",
+    "pytest-cov>=5.0.0",
+    "ruff>=0.7.0",
+    "mypy>=1.13.0",
+    "pre-commit>=4.0.0",
+]
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests", "pulse-bridge/tests"]
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+asyncio_mode = "auto"
+addopts = [
+    "--strict-markers",
+    "--strict-config",
+    "-ra",
+]
+markers = [
+    "integration: integration tests requiring live services (Postgres, Telegram)",
+    "slow: tests that take more than 5 seconds",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = ["freqtrade-fork", "dashboard-ui"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]
+ignore = ["E501"]  # let formatter handle line length
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+exclude = ["freqtrade-fork/", "dashboard-ui/", "build/", "dist/"]
+
+[[tool.mypy.overrides]]
+module = ["freqtrade.*", "ccxt.*"]
+ignore_missing_imports = true

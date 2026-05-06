@@ -1,0 +1,3 @@
+[submodule "freqtrade-fork"]
+	path = freqtrade-fork
+	url = https://github.com/freqtrade/freqtrade.git

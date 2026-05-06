@@ -1,0 +1,76 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyc
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+*.cover
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# Secrets — NEVER commit these
+.env
+.env.*
+!.env.example
+infra/secrets/*.env
+!infra/secrets/.env.example
+*.pem
+*.key
+api_keys.json
+credentials.json
+
+# Freqtrade runtime artifacts (do NOT commit live state)
+freqtrade-fork/user_data/logs/
+freqtrade-fork/user_data/backtest_results/
+freqtrade-fork/user_data/hyperopt_results/
+freqtrade-fork/user_data/data/
+freqtrade-fork/user_data/models/
+freqtrade-fork/user_data/notebooks/
+freqtrade-fork/user_data/plot/
+freqtrade-fork/user_data/tradesv3*.sqlite
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Node / Next.js (Phase 1.5 UI)
+node_modules/
+.next/
+out/
+.turbo/
+dashboard-ui/.env*.local
+dashboard-ui/coverage/
+
+# Postgres / Docker volumes
+postgres_data/
+*.dump
+
+# OS
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Local memory dirs that grow during operation
+claude-routines/memory/.cache/
+claude-routines/memory/*.tmp

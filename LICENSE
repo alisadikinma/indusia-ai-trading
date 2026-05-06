@@ -1,0 +1,28 @@
+Copyright (c) 2026 Ali Sadikin
+
+All rights reserved.
+
+This software and associated documentation files (the "Software") are
+proprietary to the copyright holder and are not licensed for redistribution,
+sublicensing, or commercial use without express written permission.
+
+Personal-use license: the copyright holder may use, modify, and run this
+Software for their own non-commercial purposes. Forks for personal study are
+permitted but may not be published or commercialized.
+
+DISCLAIMER OF WARRANTY AND TRADING DISCLAIMER
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT.
+
+This Software automates cryptocurrency trading. Cryptocurrency trading
+carries substantial risk of total capital loss. Past backtest performance
+does not guarantee future results. The copyright holder is not a registered
+investment advisor. Use at your own risk. The copyright holder shall not be
+liable for any direct, indirect, incidental, special, exemplary, or
+consequential damages (including loss of capital) arising from the use of
+this Software, even if advised of the possibility of such damage.
+
+If you did not write the strategy code yourself, do not run this Software
+with real capital.
