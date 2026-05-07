@@ -17,6 +17,13 @@ dependencies = [
     # Phase J of multi-bot restructure plan — token counting for the
     # compiled-references budget gate (infra/scripts/compile_refs.py).
     "tiktoken>=0.7",
+    # Phase 2 polymarket on-chain ingestion via Envio HyperSync — streams
+    # Polymarket OrderFilled events from Polygon at multi-thousand-events/sec
+    # (infra/data_loader/polymarket_envio.py). Requires ENVIO_API_TOKEN env
+    # (https://envio.dev/app/api-tokens, free tier, registration required
+    # since 2025-11-03). Optional at install time — loader fails loud per
+    # Iron Law 3 if env var absent.
+    "hypersync",
 ]
 
 [project.optional-dependencies]

@@ -80,3 +80,6 @@ infra/data_loader/.cache/
 
 # Claude Code CLI session state (per-machine, do not commit)
 .claude/
+
+# Runtime logs (freqtrade.service writes /opt/ai-trading/logs/freqtrade.log; same path locally)
+logs/

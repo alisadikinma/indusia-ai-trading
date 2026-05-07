@@ -11,6 +11,21 @@ canonical pair name in our database is slash-separated (BTC/USDT). The
 translation happens at insert time inside bulk_load(); the public methods
 download_month and parse_zip operate on the Binance Vision native form.
 
+Dual ms / microsecond timestamp handling
+----------------------------------------
+On 2025-01-01 Binance Vision migrated all Spot kline data from millisecond
+(13-digit) to microsecond (16-digit) integer timestamps in the first column.
+A naive parser hard-coded to ms will silently produce year ~50,000 AD
+timestamps when fed post-2025 files, and a parser hard-coded to μs will
+produce year 1970 timestamps when fed pre-2025 files. ``parse_zip()``
+auto-detects per-row by integer magnitude (μs values are ≥ 10^15 for any
+post-1970 date — comfortably above the maximum plausible ms epoch of ~4.7×10^12
+for years up to ~21000 AD) and dispatches to the correct ``time_unit``. Both
+canonicalize to a tz-aware UTC ``Datetime[ns]`` polars column with no
+sub-second drift artefacts when stitching across the boundary.
+Source: NotebookLM citation 17 — github.com/binance/binance-public-data
+(also references/crypto/exchange-microstructure.md Topic 5).
+
 Env contract:
 - BINANCE_VISION_CACHE_DIR is consulted when no explicit cache_dir is passed
   to BinanceVisionLoader. If unset and no cache_dir is given, falls back to
@@ -65,6 +80,12 @@ _BINANCE_KLINE_COLS = [
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 _DEFAULT_CACHE_DIR = REPO_ROOT / "infra" / "data_loader" / ".cache" / "binance_vision"
+
+# Dual ms/μs detection threshold (see module docstring "Dual ms / microsecond
+# timestamp handling"). Any value ≥ this is interpreted as microseconds; below
+# is milliseconds. 10^14 ms ≈ year 5138 (impossible for spot kline data); 10^14
+# μs ≈ year 1973 (impossible for Binance, founded 2017). Wide safety margin.
+_MS_VS_US_THRESHOLD = 10**14
 
 
 @dataclass(frozen=True)
@@ -266,9 +287,21 @@ class BinanceVisionLoader:
                 "ignore": pl.Float64,
             },
         )
-        # Convert ms epoch -> tz-aware UTC datetime.
+        # Dual ms / μs timestamp handling (see module docstring). Per-row
+        # detection by magnitude: values ≥ _MS_VS_US_THRESHOLD are μs, else ms.
+        # Robust to a single zip whose rows are all-ms (pre-2025), all-μs
+        # (post-2025), and the theoretical mixed case (Binance switched
+        # exactly on 2025-01-01 so a same-month file should not actually mix,
+        # but the logic remains correct if it ever does).
+        threshold = _MS_VS_US_THRESHOLD
         df = df.with_columns(
-            pl.from_epoch(pl.col("open_time_ms"), time_unit="ms")
+            pl.when(pl.col("open_time_ms") >= threshold)
+            .then(
+                pl.from_epoch(pl.col("open_time_ms"), time_unit="us")
+            )
+            .otherwise(
+                pl.from_epoch(pl.col("open_time_ms"), time_unit="ms")
+            )
             .dt.replace_time_zone("UTC")
             .alias("ts")
         )
