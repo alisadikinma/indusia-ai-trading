@@ -309,7 +309,8 @@ class ClaudeOversightModel(BaseClassifierModel):
                 "INSERT INTO brain.freqai_history "
                 "(pair, tf, train_window_days, train_rows, auc, "
                 " feature_importance, model_path, notes) "
-                "VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s, %s)",
+                "VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s, %s) "
+                "RETURNING id, retrained_at",
                 (
                     pair,
                     tf,
@@ -321,3 +322,22 @@ class ClaudeOversightModel(BaseClassifierModel):
                     notes,
                 ),
             )
+            row = cur.fetchone()
+            if row is not None:
+                new_id, retrained_at = row
+                try:
+                    notify_payload = json.dumps({
+                        "id": new_id,
+                        "retrained_at": retrained_at.isoformat(),
+                        "auc": clamped_auc,
+                        "pair": pair,
+                        "tf": tf,
+                    })
+                    cur.execute(
+                        "SELECT pg_notify('dashboard_freqai', %s)",
+                        (notify_payload,),
+                    )
+                except Exception as notify_exc:
+                    logging.getLogger(__name__).warning(
+                        "dashboard_freqai NOTIFY failed (non-fatal): %s", notify_exc
+                    )

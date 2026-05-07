@@ -567,27 +567,188 @@ async def test_backtest_run_detail_returns_full(
 # /dashboard/freqai
 # ---------------------------------------------------------------------------
 @pytest.mark.asyncio
-async def test_freqai_calibration_empty_until_phase7(
+async def test_freqai_calibration_response_shape(
     app_client: AsyncClient, auth_headers: dict[str, str]
 ) -> None:
-    """Phase 6 creates brain.freqai_history empty; calibration returns empty
-    arrays with an explanatory note until Phase 7 populates retrains."""
+    """Calibration route returns the documented envelope.
+
+    The Phase 6 surface guarantees: keys {calibration, auc_history,
+    feature_importance, note}. When brain.freqai_history is empty, the note
+    references Phase 7. Once Phase 7 has populated retrains, auc_history is
+    non-empty. This test tolerates either state by asserting shape, then
+    checking the note semantics conditionally on auc_history emptiness.
+    """
     r = await app_client.get("/dashboard/freqai/calibration", headers=auth_headers)
     assert r.status_code == 200
     body = r.json()
-    assert body["calibration"] == []
-    assert body["auc_history"] == []
-    assert body["feature_importance"] is None
-    assert "Phase 7" in body["note"]
+    for key in ("calibration", "auc_history", "feature_importance", "note"):
+        assert key in body
+    assert isinstance(body["calibration"], list)
+    assert isinstance(body["auc_history"], list)
+
+    if not body["auc_history"]:
+        # Empty state → explanatory note must reference the upstream cron.
+        assert "Phase 7" in body["note"]
+        assert body["feature_importance"] is None
+    else:
+        # Seeded state → auc rows are well-formed.
+        for row in body["auc_history"]:
+            assert "retrained_at" in row
+            assert "auc" in row
+            assert 0.0 <= float(row["auc"]) <= 1.0
+            assert "pair" in row and "tf" in row
 
 
 @pytest.mark.asyncio
-async def test_freqai_history_empty(
+async def test_freqai_calibration_decodes_feature_importance_jsonb(
+    app_client: AsyncClient,
+    auth_headers: dict[str, str],
+    db_pool: asyncpg.Pool,
+) -> None:
+    """Regression: asyncpg returns jsonb as `str`, so the previous implementation
+    blew up at `dict(latest_fi_row["feature_importance"])`. We now json.loads()
+    the column. Seed a row with non-empty feature_importance and assert the
+    response surfaces it as a real dict.
+    """
+    async with db_pool.acquire() as conn:
+        await conn.execute(
+            """
+            INSERT INTO brain.freqai_history
+                (pair, tf, train_window_days, train_rows, auc,
+                 feature_importance, model_path, notes)
+            VALUES ('TEST/USDT', '15m', 7, 1000, 0.62,
+                    $1::jsonb, 'user_data/models/test.pkl',
+                    'phase15g jsonb decode test')
+            """,
+            json.dumps({"%-rsi_14": 0.123, "%-volatility_4h": 0.456}),
+        )
+
+    r = await app_client.get("/dashboard/freqai/calibration", headers=auth_headers)
+    assert r.status_code == 200
+    body = r.json()
+    fi = body["feature_importance"]
+    assert isinstance(fi, dict)
+    # The latest non-empty feature_importance row wins; we just inserted one.
+    assert fi.get("%-rsi_14") == 0.123 or "%-rsi_14" in fi
+
+
+@pytest.mark.asyncio
+async def test_freqai_history_returns_list(
     app_client: AsyncClient, auth_headers: dict[str, str]
 ) -> None:
     r = await app_client.get("/dashboard/freqai/history", headers=auth_headers)
     assert r.status_code == 200
-    assert isinstance(r.json(), list)
+    body = r.json()
+    assert isinstance(body, list)
+    # Each row, if present, has the documented shape.
+    for row in body:
+        for key in (
+            "id",
+            "retrained_at",
+            "pair",
+            "tf",
+            "train_window_days",
+            "train_rows",
+            "auc",
+            "model_path",
+        ):
+            assert key in row
+
+
+@pytest.mark.asyncio
+async def test_freqai_predictions_requires_auth(app_client: AsyncClient) -> None:
+    r = await app_client.get("/dashboard/freqai/predictions")
+    assert r.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_freqai_predictions_empty_state_returns_envelope(
+    app_client: AsyncClient,
+    auth_headers: dict[str, str],
+    clean_db: asyncpg.Pool,
+) -> None:
+    """clean_db TRUNCATEs brain.signals — the /predictions histogram MUST
+    return an empty `bins` list with an explanatory note (Iron Law 3 — empty
+    state is a real reflection of empty data, NOT a placeholder)."""
+    r = await app_client.get(
+        "/dashboard/freqai/predictions", headers=auth_headers
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["bins"] == []
+    assert body["total"] == 0
+    assert body["hours"] == 24
+    assert "no claude oversight decisions" in body["note"].lower()
+
+
+@pytest.mark.asyncio
+async def test_freqai_predictions_buckets_recent_signals(
+    app_client: AsyncClient,
+    auth_headers: dict[str, str],
+    clean_db: asyncpg.Pool,
+) -> None:
+    """Approved/resized signals in the window land in the right size_mult bucket.
+    Vetoed signals and signals outside the window are excluded.
+    """
+    async with clean_db.acquire() as conn:
+        # Note: brain.signals UNIQUE (pair, tf, ts, signal_type) — vary `ts`
+        # explicitly to avoid collision when two `now()` calls land in the
+        # same microsecond.
+        await conn.execute(
+            """
+            INSERT INTO brain.signals (pair, tf, ts, signal_type,
+                price_at_signal, claude_decision, claude_size_mult,
+                claude_decided_at)
+            VALUES
+                ('BTC/USDT', '15m', now() - interval '1 minute',
+                    'enter_long', 50000, 'approve', 0.55, now()),
+                ('BTC/USDT', '15m', now() - interval '2 minute',
+                    'enter_long', 50100, 'approve', 0.65, now()),
+                ('ETH/USDT', '15m', now() - interval '3 minute',
+                    'enter_short', 2500, 'resize', 1.45, now()),
+                ('SOL/USDT', '15m', now() - interval '4 minute',
+                    'enter_long', 100, 'veto', NULL, now()),
+                ('BTC/USDT', '15m', now() - interval '48 hours',
+                    'enter_long', 49000, 'approve', 0.85,
+                    now() - interval '48 hours')
+            """
+        )
+    r = await app_client.get(
+        "/dashboard/freqai/predictions",
+        params={"hours": 24},
+        headers=auth_headers,
+    )
+    assert r.status_code == 200
+    body = r.json()
+    # 3 signals in window with size_mult set; vetoed + 48h-old excluded.
+    assert body["total"] == 3
+    # Each bin has lo/hi/count; counts sum to total.
+    assert sum(b["count"] for b in body["bins"]) == 3
+    los = [b["lo"] for b in body["bins"]]
+    # 0.55, 0.65, 1.45 → buckets [0.5, 0.6), [0.6, 0.7), [1.4, 1.5].
+    assert 0.5 in los
+    assert 0.6 in los
+    assert 1.4 in los
+
+
+@pytest.mark.asyncio
+async def test_freqai_predictions_hours_query_bounds(
+    app_client: AsyncClient,
+    auth_headers: dict[str, str],
+) -> None:
+    """`hours` must be in [1, 168] — out-of-range values get a 422."""
+    r = await app_client.get(
+        "/dashboard/freqai/predictions",
+        params={"hours": 0},
+        headers=auth_headers,
+    )
+    assert r.status_code == 422
+    r = await app_client.get(
+        "/dashboard/freqai/predictions",
+        params={"hours": 9999},
+        headers=auth_headers,
+    )
+    assert r.status_code == 422
 
 
 # ---------------------------------------------------------------------------

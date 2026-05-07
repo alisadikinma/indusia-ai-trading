@@ -152,10 +152,54 @@ export const PHASE_9_GATES = {
   total_trades_min: 100,
 } as const;
 
+// ---------------------------------------------------------------------------
+// FreqAI Insights types (Phase 1.5.G)
+// ---------------------------------------------------------------------------
+
+export interface FreqaiCalibrationBucket {
+  bucket_lo: number;
+  bucket_hi: number;
+  predicted_mid: number;
+  actual_win_rate: number;
+  n: number;
+}
+
+export interface FreqaiAucPoint {
+  retrained_at: string;
+  auc: number;
+  pair: string;
+  tf: string;
+}
+
 export interface FreqaiCalibration {
-  calibration: Array<Record<string, unknown>>;
-  auc_history: Array<Record<string, unknown>>;
-  feature_importance: Record<string, unknown> | null;
+  calibration: FreqaiCalibrationBucket[];
+  auc_history: FreqaiAucPoint[];
+  feature_importance: Record<string, number> | null;
+  note: string;
+}
+
+export interface FreqaiHistoryRow {
+  id: number;
+  retrained_at: string;
+  pair: string;
+  tf: string;
+  train_window_days: number;
+  train_rows: number;
+  auc: number;
+  model_path: string;
+  notes: string | null;
+}
+
+export interface FreqaiPredictionBin {
+  lo: number;
+  hi: number;
+  count: number;
+}
+
+export interface FreqaiPredictionHistogram {
+  bins: FreqaiPredictionBin[];
+  total: number;
+  hours: number;
   note: string;
 }
 
@@ -183,7 +227,7 @@ export interface IterationRun {
 }
 
 export interface WsMessage {
-  channel?: "dashboard_signals" | "dashboard_journal" | "dashboard_equity";
+  channel?: "dashboard_signals" | "dashboard_journal" | "dashboard_equity" | "dashboard_freqai";
   payload?: unknown;
   type?: "ping" | "pong";
 }

@@ -32,7 +32,7 @@ from .db import build_dsn
 
 logger = logging.getLogger("pulse_bridge.ws")
 
-CHANNELS = ("dashboard_signals", "dashboard_journal", "dashboard_equity")
+CHANNELS = ("dashboard_signals", "dashboard_journal", "dashboard_equity", "dashboard_freqai")
 HEARTBEAT_INTERVAL_SECONDS = 30.0
 
 router = APIRouter()

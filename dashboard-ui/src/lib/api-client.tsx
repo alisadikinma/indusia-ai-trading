@@ -23,6 +23,8 @@ import type {
   BrainJournalFilters,
   EquityPoint,
   FreqaiCalibration,
+  FreqaiHistoryRow,
+  FreqaiPredictionHistogram,
   IterationRun,
   JournalPage,
   OhlcvPoint,
@@ -291,6 +293,29 @@ export function useFreqai(options?: HookOpts<FreqaiCalibration>) {
   return useQuery<FreqaiCalibration, Error, FreqaiCalibration, readonly unknown[]>({
     queryKey: ["freqai-calibration"],
     queryFn: () => apiFetch<FreqaiCalibration>("/dashboard/freqai/calibration"),
+    ...options,
+  });
+}
+
+export function useFreqaiHistory(options?: HookOpts<FreqaiHistoryRow[]>) {
+  return useQuery<FreqaiHistoryRow[], Error, FreqaiHistoryRow[], readonly unknown[]>({
+    queryKey: ["freqai-history"],
+    queryFn: () => apiFetch<FreqaiHistoryRow[]>("/dashboard/freqai/history"),
+    ...options,
+  });
+}
+
+export function useFreqaiPredictions(
+  args: { hours?: number },
+  options?: HookOpts<FreqaiPredictionHistogram>,
+) {
+  const hours = args.hours ?? 24;
+  return useQuery<FreqaiPredictionHistogram, Error, FreqaiPredictionHistogram, readonly unknown[]>({
+    queryKey: ["freqai-predictions", hours],
+    queryFn: () =>
+      apiFetch<FreqaiPredictionHistogram>("/dashboard/freqai/predictions", {
+        searchParams: { hours },
+      }),
     ...options,
   });
 }
