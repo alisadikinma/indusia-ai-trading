@@ -77,3 +77,6 @@ Desktop.ini
 
 # Phase 2: Binance Vision download cache (regeneratable; do not commit)
 infra/data_loader/.cache/
+
+# Claude Code CLI session state (per-machine, do not commit)
+.claude/

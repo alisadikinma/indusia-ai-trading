@@ -1,7 +1,7 @@
 [project]
-name = "ai-trading-247"
+name = "indusia-ai-trading"
 version = "0.0.1"
-description = "24/7 autonomous AI crypto trading agent — Claude Code CLI brain over forked Freqtrade body"
+description = "INDUSIA AI Trading — multi-bot autonomous trading platform (crypto + Polymarket) with LLM oversight brain. Built by PT INDUSIA Kecerdasan Digital."
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.12"
