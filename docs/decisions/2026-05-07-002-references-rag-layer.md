@@ -1,0 +1,283 @@
+# ADR-002 — References RAG Layer Architecture
+
+## Status
+
+Accepted — 2026-05-07. Authored during plan
+`docs/plans/2026-05-07-multi-bot-references-restructure.md` Phase B.
+Companion to ADR-001 (mono-repo multi-bot).
+
+## Context
+
+The Claude oversight brain in this project has, until now, four knowledge
+surfaces (per `CLAUDE.md` §Architecture "the brain knows 4 things"):
+
+1. **Skills** (`<bot>/claude-routines/skills/*.md`) — static rule playbook.
+2. **Memory** (`<bot>/claude-routines/memory/*.md`) — operator-curated, append-only
+   wisdom from THIS portfolio.
+3. **Journal** (Postgres `<schema>.brain_journal` append-only table) — every
+   past decision with reasoning + outcome.
+4. **ML priors** (FreqAI XGBoost model for crypto; planned Polymarket
+   equivalent — calibration-tuned probabilistic forecaster).
+
+What is **missing** is a fifth surface: **external research grounding**. The
+operator has invested non-trivial token spend to build two NotebookLM
+notebooks (84 crypto sources + 121 Polymarket sources) covering exchange
+microstructure, walk-forward methodology, regulatory state, oracle-dispute
+case studies, edge-source taxonomies, and known failure modes. None of this
+content reaches runtime context. The brain reasons from skills + memory +
+training-data — and Claude's training cutoff is January 2026, which means
+fresh microstructure shifts (Binance API changes, UMA oracle upgrades, CFTC
+rulings) are invisible to the brain unless the operator manually re-syncs
+them via skills or memory.
+
+This is a capital-protection gap. Concrete failure modes:
+
+- Brain reasons over a Polymarket position without knowing the UMA
+  optimistic-oracle dispute window timing → late-resolution edge mispriced.
+- Brain interprets a Binance funding-rate flip as continuation signal because
+  it has no reference to the specific "funding flip during high vol = mean-revert
+  trap" pattern documented in the NotebookLM research.
+- Brain ignores a CFTC ruling that changed Polymarket's US access posture in
+  2025 → KYC/regulatory exposure miscalculated.
+
+In the existing plugin ecosystem on this operator's machine
+(`linkedin-post-writer`, `article-content-writer`, `carousel-prompt-generator`,
+`pitch-deck-designer`), the standard pattern is a `references/` folder
+injected via `--append-system-prompt-file` for each skill run. AI-Trading is
+the *one* surface in the operator's stack where this layer is absent — and
+also the surface where its absence has the highest blast radius.
+
+## Decision
+
+Add a fifth knowledge surface: **`references/` RAG layer**, structured
+per-bot plus a `shared/` subfolder for cross-bot invariants.
+
+```
+references/
+├── README.md
+├── global-trading-config.md             (Iron Laws + brain↔body JSON contract + precedence)
+├── crypto/
+│   ├── exchange-microstructure.md
+│   ├── freqtrade-walkforward.md
+│   ├── known-failure-modes.md
+│   ├── regime-taxonomy.md
+│   └── compiled/
+│       └── refs-crypto-decision.md      (≤8K tokens, cron inject target)
+├── polymarket/
+│   ├── clob-microstructure.md
+│   ├── uma-oracle-risk.md
+│   ├── edge-sources.md
+│   ├── regulatory-cftc.md
+│   ├── known-failure-modes.md
+│   └── compiled/
+│       └── refs-polymarket-decision.md  (≤8K tokens)
+└── shared/
+    ├── walk-forward-methodology.md
+    ├── kelly-criterion.md
+    └── claude-oversight-pattern.md
+```
+
+**Inject mechanism.** Every routine cron invocation (5-min cycles per Phase
+5+ of the original plan) appends the compiled per-bot decision file:
+
+```
+claude --append-system-prompt-file references/<bot>/compiled/refs-<bot>-decision.md \
+       --skill <routine-skill-name> ...
+```
+
+The `_template.md` in `<bot>/claude-routines/routines/` enshrines this flag —
+new routines inherit the inject by default.
+
+**Compilation strategy.** The compiled file is NOT a naive concat. The build
+script (`infra/scripts/compile_refs.py`) does **deliberate selection**:
+
+- Always include `references/global-trading-config.md` verbatim (Iron Laws are
+  immutable runtime context).
+- For each bot-specific reference: include the file's `## Quick Decision
+  Heuristics` section in full + the first paragraph (≤ 400 chars) of each `##`
+  topic section. Drops bulk content; keeps decision-relevant distillation.
+- For each shared reference: same selection rule.
+- Hard-fail if final tiktoken count > 8000 tokens. Operator must trim sources
+  if exceeded — no auto-truncation (truncation creates silent reasoning
+  blind spots).
+
+**Update workflow.** When NotebookLM gains new sources (operator runs `nlm
+research start ...` followed by `nlm research import ...`):
+
+1. Operator queries the relevant topic via `nlm notebook query <id> "..."`.
+2. Operator hand-distills the response into the corresponding
+   `references/<bot>/<topic>.md`, appending or rewriting sections.
+3. Operator runs `python infra/scripts/compile_refs.py --bot <bot>` to
+   regenerate the compiled file.
+4. Operator commits both source ref edits + compiled output. Compiled file
+   has an autogenerated header warning against manual edits.
+
+This is intentionally a **human-in-the-loop** workflow. Distillation is not a
+cron job because the cost of a bad reference (hallucinated or stale rule
+shipped into runtime context) exceeds the cost of a 30-minute manual update.
+
+## Precedence Order
+
+Within the brain's knowledge anatomy, when sources conflict at runtime, the
+brain follows this precedence (highest authority first):
+
+1. **Iron Laws** (`CLAUDE.md` §Iron Laws) — non-negotiable, architecturally
+   enforced where possible (Postgres triggers, separate process boundaries,
+   config file ownership). Cannot be overridden by ANY other source.
+2. **Skills** (`<bot>/claude-routines/skills/*.md`) — operator-curated rules
+   for THIS portfolio. Override training data and references.
+3. **References** (`references/`, this ADR) — external grounded knowledge.
+   Override training data and memory. CANNOT override skills or Iron Laws.
+4. **Memory** (`<bot>/claude-routines/memory/*.md`) — accumulated learnings from
+   live trading. Generally additive, not contradictory; if memory contradicts
+   references, references win (memory may have encoded a transient
+   misobservation).
+5. **Training data** (Claude's pretrained knowledge) — fallback only. Always
+   subordinated to operator-supplied surfaces.
+
+If at runtime the brain detects a conflict between references and
+skills/Iron Laws, it MUST: (a) abstain from the trade (default veto), (b)
+log the conflict to `<schema>.brain_journal` with `decision='halt'` and
+detailed reasoning, and (c) emit a Telegram alert flagging the conflict for
+operator review. Conflicts are not silently resolved.
+
+## Token-budget math
+
+Per cycle, with prompt cache hits (Anthropic prompt cache TTL = 5 minutes,
+cron cadence = 5 minutes → cache hit ≥ 95% of cycles):
+
+| Component | Tokens | Notes |
+|---|---|---|
+| Compiled refs (`refs-<bot>-decision.md`) | ≤ 8000 | hard cap |
+| Skill body + memory + recent journal SELECT | ~5000–10000 | grows with memory; budget reviewed each Phase |
+| User prompt + tool results | ~5000 | varies |
+| **Cycle input total target** | **≤ 25000** | well under Sonnet 4.6 200K context |
+
+Cost per bot per month at Sonnet 4.6 input pricing (~$3/Mtok), 288 cycles/day
+× 30 days, 95% cache hit rate (cache reads at 0.1× rate):
+
+```
+Input tokens/cycle = 25000
+Effective per-cycle billing = (25000 × 0.05 first-write) + (25000 × 0.95 × 0.1 cache-read)
+                           ≈ 1250 + 2375 = 3625 tokens billed per cycle
+Monthly = 3625 × 288 × 30 = 31.3M tokens × $3/Mtok ≈ $94/bot/month
+```
+
+Of which the references contribution is:
+
+```
+Refs effective per-cycle billing = (8000 × 0.05) + (8000 × 0.95 × 0.1)
+                                = 400 + 760 = 1160 tokens billed per cycle
+Monthly refs cost = 1160 × 288 × 30 = 10M tokens × $3/Mtok ≈ $30/bot/month
+```
+
+Approximately **$30/bot/month** for grounding. Acceptable against the
+capital-protection benefit and well below the operator's existing API spend
+on lower-stakes content plugins.
+
+## Staleness mitigation
+
+References can decay (Binance changes API, UMA upgrades oracle, CFTC issues
+new ruling). Mitigation, deferred to Phase 5+ but specified here:
+
+- **Quarterly cron** (`infra/scripts/refs_staleness_check.py`, to be written
+  as part of the post-mortem cron family) re-queries each NotebookLM notebook
+  for the same topics, diff-checks against current `references/<bot>/<topic>.md`,
+  and emits a Telegram alert if material divergence is detected. Operator
+  decides whether to re-distill.
+- **Auto-flag on journal pattern miss.** When the post-mortem cron detects a
+  trade outcome that contradicts a reference's Quick Decision Heuristic
+  (e.g., "funding flip + high vol = mean-revert trap" misfired for the
+  third time), it appends a flag to `<bot>/claude-routines/memory/lessons-learned.md`
+  AND tags the originating reference for operator review.
+
+Neither mechanism modifies references autonomously. Iron Law 4 ("Claude must
+not modify its own discipline files") extends to `references/`: the
+quarterly cron and post-mortem can FLAG, but only the operator EDITS.
+
+## Consequences
+
+**Positive:**
+
+- Brain reasoning is grounded in fresh, citation-traceable research instead of
+  drifting on training-data cutoff.
+- Journal entries can cite references explicitly (e.g., "vetoed signal —
+  references/crypto/known-failure-modes.md §flash-crash-liquidity-cliff
+  pattern matched current order book"). Audit log gets richer without manual
+  effort.
+- Failure-mode catalog grows with the brain's exposure: post-mortem cron
+  flags reference-vs-reality divergence, operator strengthens the reference,
+  next cycle's brain sees the strengthened version. Self-reinforcing loop.
+
+**Negative:**
+
+- ~$30/bot/month token cost added to the operating run-rate. Tolerable.
+- Distillation is manual labor. Estimated 15 min per reference file per
+  refresh cycle, ~10 files per bot, ~quarterly = ~5 hours/quarter per bot
+  steady-state.
+- Compiled file token-budget pressure: as references grow richer, the
+  selection rule (Quick Heuristics + first-paragraph-per-topic) may need
+  tightening. Acceptable; the script hard-fails with a clear message.
+- Stale-reference risk if quarterly check is skipped. Mitigated by auto-flag
+  on journal pattern miss (see "Staleness mitigation" above), and by the
+  operator's calendar discipline.
+
+## Alternatives Considered
+
+**1. Inline reference content directly into skills (rejected).**
+
+Easiest mechanically: copy NotebookLM-distilled content into
+`<bot>/claude-routines/skills/known-traps.md`. Rejected because skills are
+decision rules ("if X then Y") whereas references are facts ("X behaves like
+Z because mechanism W"). Mixing the two loses precedence clarity — operator
+cannot tell at audit time which line is rule (operator-asserted) vs reference
+(externally-grounded). Iron Law 4's read-only-skills convention also
+becomes ambiguous: can the post-mortem cron flag an inlined reference? With
+the layer separated, the answer is unambiguous (yes, refs flagged; no, skills
+never auto-flagged).
+
+**2. Live RAG via vector database (rejected).**
+
+Stand up Postgres pgvector + embed each NotebookLM source + retrieve
+top-k per cycle. Rejected because: (a) latency overhead per cycle (embedding
++ ANN search) jeopardizes the 30-second cron budget, (b) non-determinism (top-k
+results shift as embeddings drift) violates the audit-log reproducibility
+principle, (c) infrastructural overhead — pgvector + maintenance + corpus
+re-indexing — for marginal benefit at single-operator scale. Compiled-file
+inject is deterministic, fast, and version-controlled.
+
+**3. NotebookLM as runtime dependency (rejected).**
+
+Brain queries NotebookLM live via `nlm notebook query` per cycle. Rejected
+hard: introduces network dep + non-determinism into the trading loop, and
+NotebookLM is a hosted Google service with no SLA the operator can lean on.
+Capital protection requires deterministic, reproducible reasoning surfaces.
+
+**4. Skip the layer entirely; rely on memory growth (rejected).**
+
+Argument: post-mortem cron grows
+`<bot>/claude-routines/memory/lessons-learned.md` over time, eventually
+encoding the references' content via lived experience. Rejected because: this
+trades token cost for capital cost. The brain has to LIVE the failure mode
+once before the lesson lands in memory. References front-load that knowledge
+so the brain can avoid the first occurrence, not just the recurrences.
+Especially for tail-risk patterns (oracle disputes, flash-crash liquidity
+cliffs), one occurrence is enough to wipe a $100 starter account.
+
+## References
+
+- Companion ADR: `docs/decisions/2026-05-07-001-mono-repo-multi-bot.md`
+- Restructure plan: `docs/plans/2026-05-07-multi-bot-references-restructure.md`
+- Original plan (Phase 4–6 cron architecture):
+  `docs/plans/2026-05-06-ai-trading-247.md`
+- Project memory contract: `CLAUDE.md` §Architecture, §Iron Laws,
+  §Anti-Placeholder Rules
+- NotebookLM crypto: `14c3a70f-c265-456e-a937-9281af14cae1` (84 sources)
+- NotebookLM polymarket: `d3fe46b9-a3c2-4915-87c3-72c708835749` (121 sources)
+- Polymarket raw research:
+  `docs/research/2026-05-07-polymarket-ai-bot-deep-research-raw.md`
+- Existing plugin ecosystem precedent for `references/` layer:
+  `~/.claude/plugins/cache/linkedin-post-writer/`,
+  `~/.claude/plugins/cache/article-content-writer/`,
+  `~/.claude/plugins/cache/ai-image-carousel-prompt-gen/`,
+  `~/.claude/plugins/cache/pitch-deck-designer/`
