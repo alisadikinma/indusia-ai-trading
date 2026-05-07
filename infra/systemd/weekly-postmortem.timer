@@ -1,0 +1,12 @@
+[Unit]
+Description=AI Trading 24/7 — Weekly post-mortem timer (Sun 00:00 UTC)
+Documentation=file:///opt/ai-trading/crypto-bot/claude-routines/routines/weekly-postmortem.md
+
+[Timer]
+Unit=weekly-postmortem.service
+OnCalendar=Sun *-*-* 00:00:00 UTC
+Persistent=true
+AccuracySec=1m
+
+[Install]
+WantedBy=timers.target

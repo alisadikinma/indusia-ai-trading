@@ -52,11 +52,23 @@ REQUIRED_SECTIONS: dict[str, list[str]] = {
         "## Procedure",
         "## Output",
     ],
+    "pattern-detector.md": [
+        "# Pattern Detector",
+        "## When to apply",
+        "## Decision rules",
+        "## Output format",
+    ],
 }
 
 ROUTINE_REQUIRED_SECTIONS: dict[str, list[str]] = {
     "oversight-loop.md": [
         "# Oversight Loop Routine",
+        "## Cadence",
+        "## Procedure",
+        "## API contract",
+    ],
+    "weekly-postmortem.md": [
+        "# Weekly Post-Mortem Routine",
         "## Cadence",
         "## Procedure",
         "## API contract",
@@ -118,9 +130,19 @@ def test_skill_no_vague_language(filename: str) -> None:
     )
 
 
+# Skills that are NOT loaded by oversight-loop.md (the runtime 5-min cron).
+# pattern-detector.md is exclusively invoked by the Phase 6 post-mortem cron;
+# loading it into oversight-loop would defeat Iron Law 4 (only the post-mortem
+# cron writes to known-traps.md). Keep this set minimal — most skills MUST be
+# in oversight-loop.
+SKILLS_NOT_IN_OVERSIGHT_LOOP = {"pattern-detector.md"}
+
+
 def test_oversight_loop_references_all_skills() -> None:
     routine = (ROUTINES_DIR / "oversight-loop.md").read_text(encoding="utf-8")
     for skill in REQUIRED_SECTIONS.keys():
+        if skill in SKILLS_NOT_IN_OVERSIGHT_LOOP:
+            continue
         assert skill in routine, (
             f"oversight-loop.md must reference {skill} so future operators "
             f"can audit which skills the cron loads."

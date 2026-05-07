@@ -1,0 +1,27 @@
+[Unit]
+Description=AI Trading 24/7 — Weekly post-mortem cron (Phase 6)
+Documentation=file:///opt/ai-trading/crypto-bot/claude-routines/routines/weekly-postmortem.md
+After=network-online.target postgres-init.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=trader
+Group=trader
+WorkingDirectory=/opt/ai-trading
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=/opt/ai-trading/.env
+ExecStart=/opt/ai-trading/.venv/bin/python -m infra.scripts.post_mortem_cron
+TimeoutStartSec=1800
+StandardOutput=journal
+StandardError=journal
+
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/opt/ai-trading/crypto-bot/claude-routines
+
+[Install]
+WantedBy=multi-user.target

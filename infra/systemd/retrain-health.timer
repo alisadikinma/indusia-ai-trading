@@ -1,0 +1,12 @@
+[Unit]
+Description=AI Trading 24/7 — FreqAI retrain health check timer (daily 06:00 UTC)
+Documentation=file:///opt/ai-trading/docs/plans/2026-05-06-ai-trading-247.md
+
+[Timer]
+Unit=retrain-health.service
+OnCalendar=*-*-* 06:00:00 UTC
+Persistent=true
+AccuracySec=1m
+
+[Install]
+WantedBy=timers.target

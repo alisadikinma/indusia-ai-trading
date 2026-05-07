@@ -260,6 +260,8 @@ async def test_backtest_run_detail_returns_full(
 async def test_freqai_calibration_empty_until_phase7(
     app_client: AsyncClient, auth_headers: dict[str, str]
 ) -> None:
+    """Phase 6 creates brain.freqai_history empty; calibration returns empty
+    arrays with an explanatory note until Phase 7 populates retrains."""
     r = await app_client.get("/dashboard/freqai/calibration", headers=auth_headers)
     assert r.status_code == 200
     body = r.json()
