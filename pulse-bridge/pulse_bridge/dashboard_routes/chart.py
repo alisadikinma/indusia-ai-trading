@@ -9,7 +9,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict
 
 router = APIRouter()
@@ -28,7 +28,14 @@ _FREQTRADE_CONFIG = _REPO_ROOT / "crypto-bot" / "freqtrade-config" / "config.jso
 
 @functools.lru_cache(maxsize=1)
 def _load_pair_whitelist() -> list[str]:
-    """Read pair_whitelist from crypto-bot config. Hard-fails on any error (Iron Law 3)."""
+    """Read pair_whitelist from crypto-bot config. Hard-fails on any error (Iron Law 3).
+
+    Note: ``functools.lru_cache`` does NOT cache exceptions, so every failed
+    request re-reads the file. This means a config repair (operator edits
+    config.json without service restart) IS picked up on the next request —
+    but a SUCCESSFUL load is cached until restart. Documented behavior, not a
+    bug: the operator workflow is "edit config → restart service".
+    """
     raw = _FREQTRADE_CONFIG.read_text(encoding="utf-8")
     cfg = json.loads(raw)
     pairs = cfg["exchange"]["pair_whitelist"]
@@ -43,11 +50,18 @@ def _load_pair_whitelist() -> list[str]:
 async def get_pairs() -> list[str]:
     """Return the operator-configured pair whitelist from crypto-bot config.
 
-    Hard-fails with HTTP 500 if config is missing or unparseable (Iron Law 3 —
-    no silent fallback to a default list). The config is operator-only; changes
-    require a service restart which clears the lru_cache.
+    Returns HTTP 503 with a diagnostic detail if the config is missing,
+    unparseable, or has no pair_whitelist (Iron Law 3 — no silent fallback to
+    a default list). The config is operator-only; a successful load is cached
+    until service restart.
     """
-    return _load_pair_whitelist()
+    try:
+        return _load_pair_whitelist()
+    except (FileNotFoundError, json.JSONDecodeError, KeyError, RuntimeError) as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"pair_whitelist unavailable: {exc}",
+        ) from exc
 
 
 class OhlcvPoint(BaseModel):

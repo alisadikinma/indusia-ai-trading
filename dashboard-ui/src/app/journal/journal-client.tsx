@@ -225,80 +225,85 @@ export function JournalClient() {
       ) : (
         <Card>
           <CardContent className="p-0">
-            {/* Header row labels — outside the virtualized scroll body.
-                Wrapped in overflow-x-auto so columns don't squish on sm. */}
+            {/* Single overflow-x-auto container wraps BOTH the column-header
+                strip and the virtualized body so they scroll horizontally
+                together on <640px viewports. The virtualized body keeps its
+                own overflow-y-auto for vertical scrolling (TanStack Virtual
+                requires a scrollable element for parentRef). */}
             <div className="overflow-x-auto">
-              <div className="grid min-w-[640px] grid-cols-12 gap-3 border-b border-border bg-muted/30 px-4 py-2 pl-12 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                <span className="col-span-3">Timestamp</span>
-                <span className="col-span-2">Regime</span>
-                <span className="col-span-1">Decision</span>
-                <span className="col-span-1">Conf.</span>
-                <span className="col-span-4">Reasoning</span>
-                <span className="col-span-1 justify-self-end">Outcome</span>
+              <div className="min-w-[640px]">
+                <div className="grid grid-cols-12 gap-3 border-b border-border bg-muted/30 px-4 py-2 pl-12 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  <span className="col-span-3">Timestamp</span>
+                  <span className="col-span-2">Regime</span>
+                  <span className="col-span-1">Decision</span>
+                  <span className="col-span-1">Conf.</span>
+                  <span className="col-span-4">Reasoning</span>
+                  <span className="col-span-1 justify-self-end">Outcome</span>
+                </div>
+
+                <div
+                  ref={parentRef}
+                  className="relative max-h-[70vh] overflow-y-auto"
+                  data-testid="journal-virtual-scroll"
+                >
+                  <div
+                    style={{
+                      height: `${rowVirtualizer.getTotalSize()}px`,
+                      position: "relative",
+                      width: "100%",
+                    }}
+                  >
+                    {rowVirtualizer.getVirtualItems().map((vi) => {
+                      const entry = items[vi.index];
+                      return (
+                        <div
+                          key={entry.id}
+                          data-index={vi.index}
+                          ref={rowVirtualizer.measureElement}
+                          style={{
+                            position: "absolute",
+                            top: 0,
+                            left: 0,
+                            right: 0,
+                            transform: `translateY(${vi.start}px)`,
+                          }}
+                        >
+                          <JournalEntry
+                            entry={entry}
+                            expanded={expandedId === entry.id}
+                            onToggle={() =>
+                              setExpandedId((prev) =>
+                                prev === entry.id ? null : entry.id,
+                              )
+                            }
+                          />
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {isFetchingNextPage ? (
+                  <div
+                    className="border-t border-border px-4 py-2 text-xs text-muted-foreground"
+                    data-testid="journal-loading-more"
+                  >
+                    Loading older entries…
+                  </div>
+                ) : isFetching && !isFirstLoad ? (
+                  <div className="border-t border-border px-4 py-2 text-xs text-muted-foreground">
+                    Refreshing…
+                  </div>
+                ) : !hasNextPage && items.length > 0 ? (
+                  <div
+                    className="border-t border-border px-4 py-2 text-xs text-muted-foreground"
+                    data-testid="journal-end-of-list"
+                  >
+                    End of journal — {items.length} of {total} entries loaded.
+                  </div>
+                ) : null}
               </div>
             </div>
-
-            <div
-              ref={parentRef}
-              className="relative max-h-[70vh] overflow-auto"
-              data-testid="journal-virtual-scroll"
-            >
-              <div
-                style={{
-                  height: `${rowVirtualizer.getTotalSize()}px`,
-                  position: "relative",
-                  width: "100%",
-                }}
-              >
-                {rowVirtualizer.getVirtualItems().map((vi) => {
-                  const entry = items[vi.index];
-                  return (
-                    <div
-                      key={entry.id}
-                      data-index={vi.index}
-                      ref={rowVirtualizer.measureElement}
-                      style={{
-                        position: "absolute",
-                        top: 0,
-                        left: 0,
-                        right: 0,
-                        transform: `translateY(${vi.start}px)`,
-                      }}
-                    >
-                      <JournalEntry
-                        entry={entry}
-                        expanded={expandedId === entry.id}
-                        onToggle={() =>
-                          setExpandedId((prev) =>
-                            prev === entry.id ? null : entry.id,
-                          )
-                        }
-                      />
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
-            {isFetchingNextPage ? (
-              <div
-                className="border-t border-border px-4 py-2 text-xs text-muted-foreground"
-                data-testid="journal-loading-more"
-              >
-                Loading older entries…
-              </div>
-            ) : isFetching && !isFirstLoad ? (
-              <div className="border-t border-border px-4 py-2 text-xs text-muted-foreground">
-                Refreshing…
-              </div>
-            ) : !hasNextPage && items.length > 0 ? (
-              <div
-                className="border-t border-border px-4 py-2 text-xs text-muted-foreground"
-                data-testid="journal-end-of-list"
-              >
-                End of journal — {items.length} of {total} entries loaded.
-              </div>
-            ) : null}
           </CardContent>
         </Card>
       )}

@@ -225,6 +225,15 @@ export function BacktestChart({
   const { data: pairsData, isLoading: pairsLoading } = usePairs();
   const pairs = pairsData ?? [];
 
+  // If the operator's pair_whitelist doesn't include DEFAULT_PAIR (e.g. after a
+  // config change to a non-BTC strategy), snap to the first available pair so
+  // the chart doesn't silently query OHLCV for a pair the bot won't trade.
+  React.useEffect(() => {
+    if (pairsData && pairsData.length > 0 && !pairsData.includes(pair)) {
+      setPair(pairsData[0]);
+    }
+  }, [pairsData, pair]);
+
   // OHLCV bounded to the test window — fall back to recent data if the
   // window has no rows in brain.ohlcv.
   const ohlcvParams = React.useMemo(() => {
@@ -393,6 +402,8 @@ export function BacktestChart({
           <Alert variant="muted">
             <AlertDescription>
               Select a backtest run to plot trades + equity curve.
+              brain.backtest_runs populates after Phase 9 walk-forward (or
+              Phase 8 hyperopt sweeps).
             </AlertDescription>
           </Alert>
         ) : null}

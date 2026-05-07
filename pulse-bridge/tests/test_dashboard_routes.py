@@ -1019,3 +1019,28 @@ async def test_chart_pairs_returns_whitelist(
     for entry in body:
         assert isinstance(entry, str)
         assert "/" in entry  # minimal sanity: pairs are "BASE/QUOTE" format
+
+
+@pytest.mark.asyncio
+async def test_chart_pairs_missing_config_returns_503(
+    app_client: AsyncClient,
+    auth_headers: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    """Iron Law 3: a missing/unparseable config must surface as a 503 with a
+    diagnostic detail, NOT a generic 500 or a silent fallback to a default.
+    """
+    from pulse_bridge.dashboard_routes import chart
+
+    # Point at a non-existent file and clear the lru_cache so the next call
+    # actually re-reads (cache survives between tests).
+    monkeypatch.setattr(chart, "_FREQTRADE_CONFIG", tmp_path / "missing.json")
+    chart._load_pair_whitelist.cache_clear()
+
+    try:
+        r = await app_client.get("/dashboard/chart/pairs", headers=auth_headers)
+        assert r.status_code == 503
+        assert "pair_whitelist unavailable" in r.json()["detail"]
+    finally:
+        chart._load_pair_whitelist.cache_clear()
