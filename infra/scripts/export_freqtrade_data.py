@@ -1,7 +1,7 @@
 """Export brain.ohlcv rows to Freqtrade-format Feather files.
 
 Phase 3 verification helper: Freqtrade's backtester reads OHLCV from
-``freqtrade-config/data/<exchange>/<PAIR>-<tf>.feather``. Our canonical OHLCV store
+``crypto-bot/freqtrade-config/data/<exchange>/<PAIR>-<tf>.feather``. Our canonical OHLCV store
 is ``brain.ohlcv`` in Postgres. This script bridges the two so we can verify
 ``ClaudeOversightStrategy`` end-to-end on the real January 2024 BTC/USDT
 data we loaded in Phase 2 — no live exchange call needed.
@@ -32,7 +32,7 @@ Usage:
         --start 2024-01-01 \
         --end 2024-02-01 \
         --exchange binance \
-        --datadir freqtrade-config/data
+        --datadir crypto-bot/freqtrade-config/data
 """
 from __future__ import annotations
 
@@ -73,7 +73,7 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--exchange", default="binance")
     p.add_argument(
         "--datadir",
-        default="freqtrade-config/data",
+        default="crypto-bot/freqtrade-config/data",
         help="Freqtrade data dir (will create <datadir>/<exchange>/)",
     )
     return p.parse_args()

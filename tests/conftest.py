@@ -1,15 +1,17 @@
 """Root pytest conftest.
 
-Adds ``freqtrade-config`` to ``sys.path`` so tests can import
+Adds ``crypto-bot/freqtrade-config`` to ``sys.path`` so tests can import
 ``strategies.ClaudeOversightStrategy`` directly. Freqtrade itself is
 installed via ``pip install -e freqtrade-fork`` and discovered through
 normal site-packages.
 
-Why ``freqtrade-config`` and not ``freqtrade-fork/user_data``: Freqtrade's
-own ``.gitignore`` excludes ``user_data/*`` from the submodule's git, so
-files there are untracked. We keep our strategy + config in a parent-repo
-directory (``freqtrade-config``) and tell Freqtrade where to find it via
-``--strategy-path freqtrade-config/strategies --config freqtrade-config/config.json``.
+Why ``crypto-bot/freqtrade-config`` and not ``freqtrade-fork/user_data``:
+Freqtrade's own ``.gitignore`` excludes ``user_data/*`` from the submodule's
+git, so files there are untracked. We keep our strategy + config in a
+parent-repo directory under the bot's folder (``crypto-bot/freqtrade-config``,
+moved here per ADR-001) and tell Freqtrade where to find it via
+``--strategy-path crypto-bot/freqtrade-config/strategies
+--config crypto-bot/freqtrade-config/config.json``.
 
 Also loads the repo-root ``.env`` so integration tests that depend on
 ``POSTGRES_*`` env vars work in fresh shells without manual sourcing.
@@ -21,7 +23,7 @@ import sys
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
-_FREQTRADE_CONFIG = _REPO_ROOT / "freqtrade-config"
+_FREQTRADE_CONFIG = _REPO_ROOT / "crypto-bot" / "freqtrade-config"
 
 if _FREQTRADE_CONFIG.is_dir() and str(_FREQTRADE_CONFIG) not in sys.path:
     sys.path.insert(0, str(_FREQTRADE_CONFIG))

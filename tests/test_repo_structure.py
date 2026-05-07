@@ -29,17 +29,42 @@ def test_required_root_file_exists(relative_path: str) -> None:
 @pytest.mark.parametrize(
     "relative_dir",
     [
-        "claude-routines",
+        # Shared infrastructure (mono-repo per ADR-001)
         "pulse-bridge",
         "infra",
         "tests",
         "docs",
+        # freqtrade-fork submodule stays at root per ADR-001 (rewrite-cost > benefit)
         "freqtrade-fork",
+        # Per-bot folders (ADR-001)
+        "crypto-bot",
+        "crypto-bot/claude-routines",
+        "crypto-bot/freqtrade-config",
     ],
 )
 def test_required_directory_exists(relative_dir: str) -> None:
     target = REPO_ROOT / relative_dir
     assert target.is_dir(), f"{relative_dir}/ not found at repo root ({target})"
+
+
+def test_crypto_bot_readme_exists() -> None:
+    """crypto-bot/README.md must explain the bot boundary per ADR-001."""
+    readme = REPO_ROOT / "crypto-bot" / "README.md"
+    assert readme.is_file(), f"crypto-bot/README.md missing ({readme})"
+    body = readme.read_text(encoding="utf-8")
+    assert len(body) >= 800, (
+        f"crypto-bot/README.md too thin ({len(body)} chars, need >=800)"
+    )
+
+
+def test_old_root_paths_no_longer_exist() -> None:
+    """After Phase C refactor, root-level claude-routines/ and freqtrade-config/
+    must no longer exist — they moved into crypto-bot/."""
+    stale_paths = ["claude-routines", "freqtrade-config"]
+    found_stale = [p for p in stale_paths if (REPO_ROOT / p).exists()]
+    assert not found_stale, (
+        f"Phase C refactor incomplete — stale root paths still present: {found_stale}"
+    )
 
 
 def test_freqtrade_submodule_is_populated() -> None:

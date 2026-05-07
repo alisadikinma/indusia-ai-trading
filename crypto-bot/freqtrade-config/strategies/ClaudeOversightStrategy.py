@@ -139,7 +139,7 @@ class ClaudeOversightStrategy(IStrategy):
         atr_pct = (2.0 * float(latest_atr)) / float(current_rate)
         return -atr_pct
 
-    # ----- entry confirmation (writes signal to brain.signals) -------------
+    # ----- entry confirmation (writes signal + reads Claude veto) ----------
     def confirm_trade_entry(
         self,
         pair: str,
@@ -152,32 +152,50 @@ class ClaudeOversightStrategy(IStrategy):
         side: str,
         **kwargs,
     ) -> bool:
-        """Persist the entry signal to brain.signals.
+        """Persist the entry signal then honor Claude's veto (Phase 4).
 
-        Phase 3 behaviour: every rule-based signal is "approved" by default
-        (claude_decision stays NULL on the row). Phase 4 will replace this
-        body to call PULSE bridge for Claude's verdict before allowing entry.
-
-        Failure policy: HARD-FAIL (return False, blocking the trade) when the
-        Postgres write fails. We are paper-trade-only at this phase (Iron
-        Law 2) and visibility into the journal is more valuable than slipping
-        an unrecorded trade through. A live-mode operator would revisit this
-        when paper-trading is signed off.
+        Flow:
+            1. Write the rule-based signal to brain.signals (Phase 3 behavior).
+               Failure to write is a hard abort — paper-trade-only phase, we
+               must not place trades that aren't auditable.
+            2. Read brain.signals.claude_decision for the row we just wrote.
+               - 'veto'    → return False (Claude vetoed; block entry).
+               - 'resize'  → return True. Phase 4 limitation: Freqtrade has
+                             already computed `amount` so size_mult is logged
+                             but not applied here. Phase 7 will integrate
+                             custom_stake_amount() to honor size_mult before
+                             order placement.
+               - 'approve' / NULL → proceed (advisory model — NULL means
+                             Claude's 5-min routine has not yet decided, so
+                             rule-based default fires).
         """
-        try:
-            self._write_signal_to_brain(
-                pair=pair,
-                side=side,
-                rate=rate,
-                ts=current_time,
-                entry_tag=entry_tag,
-            )
-        except Exception:
-            logger.exception(
+        signal_id = self._write_signal_to_brain(
+            pair=pair,
+            side=side,
+            rate=rate,
+            ts=current_time,
+            entry_tag=entry_tag,
+        )
+        if signal_id is None:
+            logger.error(
                 "ClaudeOversightStrategy: failed to write signal to brain.signals; "
                 "blocking trade entry until visibility is restored."
             )
             return False
+
+        decision = self._read_claude_decision(signal_id)
+        if decision == "veto":
+            self._log_veto(pair=pair, signal_id=signal_id, current_time=current_time)
+            return False
+        if decision == "resize":
+            logger.info(
+                "ClaudeOversightStrategy: signal_id=%s resized by Claude; proceeding "
+                "with original Freqtrade-computed amount (Phase 7 will integrate "
+                "custom_stake_amount to honor size_mult).",
+                signal_id,
+            )
+            return True
+        # decision in (None, "approve") → proceed with rule-based default.
         return True
 
     # ----- internals -------------------------------------------------------
@@ -188,35 +206,110 @@ class ClaudeOversightStrategy(IStrategy):
         rate: float,
         ts: datetime,
         entry_tag: Optional[str],
-    ) -> None:
-        """INSERT into brain.signals.
+    ) -> Optional[int]:
+        """INSERT into brain.signals; return the new id (or the existing one
+        if (pair, tf, ts, signal_type) already maps to a row). Returns None
+        on Postgres failure so the caller can hard-abort the trade.
 
-        ON CONFLICT DO NOTHING — the (pair, tf, ts, signal_type) UNIQUE
-        constraint protects against duplicate inserts when Freqtrade retries
-        an order on the same candle.
+        The (pair, tf, ts, signal_type) UNIQUE constraint protects against
+        duplicate inserts when Freqtrade retries an order on the same candle.
         """
         signal_type = "enter_long" if side == "long" else "enter_short"
         indicators_payload = '{"entry_tag": ' + (
             'null' if entry_tag is None else f'"{entry_tag}"'
         ) + "}"
 
+        # ON CONFLICT ... DO UPDATE on a no-op column so we get RETURNING id
+        # for both fresh inserts and existing rows (DO NOTHING wouldn't
+        # return the id of the colliding row).
         sql = (
             "INSERT INTO brain.signals "
             "(ts, pair, tf, signal_type, price_at_signal, indicators) "
             "VALUES (%s, %s, %s, %s, %s, %s::jsonb) "
-            "ON CONFLICT (pair, tf, ts, signal_type) DO NOTHING"
+            "ON CONFLICT (pair, tf, ts, signal_type) "
+            "DO UPDATE SET indicators = brain.signals.indicators "
+            "RETURNING id"
         )
 
-        conn = _get_pg_connection()
-        with conn.cursor() as cur:
-            cur.execute(
-                sql,
-                (
-                    ts,
-                    pair,
-                    self.timeframe,
-                    signal_type,
-                    rate,
-                    indicators_payload,
-                ),
+        try:
+            conn = _get_pg_connection()
+            with conn.cursor() as cur:
+                cur.execute(
+                    sql,
+                    (
+                        ts,
+                        pair,
+                        self.timeframe,
+                        signal_type,
+                        rate,
+                        indicators_payload,
+                    ),
+                )
+                row = cur.fetchone()
+        except Exception:
+            logger.exception(
+                "ClaudeOversightStrategy: brain.signals INSERT raised; "
+                "returning None so the strategy can abort."
+            )
+            return None
+        if row is None:
+            return None
+        return int(row[0])
+
+    def _read_claude_decision(self, signal_id: int) -> Optional[str]:
+        """Read brain.signals.claude_decision. Returns None when NULL or row
+        missing (treated as 'no decision yet' — proceed with rule-based)."""
+        try:
+            conn = _get_pg_connection()
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT claude_decision FROM brain.signals WHERE id = %s",
+                    (signal_id,),
+                )
+                row = cur.fetchone()
+        except Exception:
+            logger.exception(
+                "ClaudeOversightStrategy: failed reading claude_decision for "
+                "signal_id=%s; defaulting to None (proceed).",
+                signal_id,
+            )
+            return None
+        if row is None:
+            return None
+        return row[0]
+
+    def _log_veto(self, pair: str, signal_id: int, current_time: datetime) -> None:
+        """Append a journal note that we refused entry due to Claude's veto.
+
+        brain.brain_journal is append-only (Iron Law 5). This call INSERTs only.
+        On any failure we log loudly but don't re-raise — the veto itself
+        already short-circuits the trade; missing the audit row is bad but
+        not as bad as silently slipping the trade through.
+        """
+        reasoning = (
+            f"confirm_trade_entry refused: Claude vetoed signal_id={signal_id} "
+            f"on {pair} at {current_time.isoformat()}. Strategy honored the veto."
+        )
+        try:
+            conn = _get_pg_connection()
+            with conn.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO brain.brain_journal "
+                    "(ts, signal_id, regime, decision, reasoning, confidence) "
+                    "VALUES (now(), %s, %s, %s, %s, %s)",
+                    (
+                        signal_id,
+                        # Strategy doesn't classify regime — that is Claude's job.
+                        # Use 'no_action' bucket via decision field, regime stays
+                        # 'unknown' so analytics know the entry was strategy-side.
+                        "unknown",
+                        "no_action",
+                        reasoning,
+                        None,
+                    ),
+                )
+        except Exception:
+            logger.exception(
+                "ClaudeOversightStrategy: failed to log veto for signal_id=%s",
+                signal_id,
             )

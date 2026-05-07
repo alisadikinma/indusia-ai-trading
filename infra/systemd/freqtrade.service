@@ -9,17 +9,18 @@ Requires=docker.service
 Type=simple
 User=trader
 Group=trader
-# Run from repo root so freqtrade-config/ paths resolve cleanly. Strategy +
-# config live in freqtrade-config/ (parent-tracked) rather than under
+# Run from repo root so crypto-bot/freqtrade-config/ paths resolve cleanly.
+# Strategy + config live in crypto-bot/freqtrade-config/ (parent-tracked,
+# moved under crypto-bot/ per ADR-001) rather than under
 # freqtrade-fork/user_data/ (gitignored by Freqtrade upstream).
 WorkingDirectory=/opt/ai-trading
 Environment=PYTHONUNBUFFERED=1
 EnvironmentFile=/opt/ai-trading/.env
 ExecStart=/opt/ai-trading/.venv/bin/freqtrade trade \
-    --config /opt/ai-trading/freqtrade-config/config.json \
+    --config /opt/ai-trading/crypto-bot/freqtrade-config/config.json \
     --strategy ClaudeOversightStrategy \
-    --strategy-path /opt/ai-trading/freqtrade-config/strategies \
-    --datadir /opt/ai-trading/freqtrade-config/data \
+    --strategy-path /opt/ai-trading/crypto-bot/freqtrade-config/strategies \
+    --datadir /opt/ai-trading/crypto-bot/freqtrade-config/data \
     --logfile /opt/ai-trading/logs/freqtrade.log
 Restart=always
 RestartSec=10
@@ -33,7 +34,7 @@ MemoryMax=2G
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/opt/ai-trading/freqtrade-config/data /opt/ai-trading/logs
+ReadWritePaths=/opt/ai-trading/crypto-bot/freqtrade-config/data /opt/ai-trading/logs
 PrivateTmp=true
 
 [Install]
