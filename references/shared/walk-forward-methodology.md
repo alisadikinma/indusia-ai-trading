@@ -118,6 +118,56 @@ in any single OOS fold, treat the per-fold metrics as informational only —
 never use them to clear an Iron Law 2 gate. Demand a longer test window or
 a higher-frequency strategy.
 
+## Topic 4 — Lopez de Prado techniques (CPCV, Triple-Barrier, Meta-Labeling, DSR)
+
+Marcos Lopez de Prado's *Advances in Financial Machine Learning* is the
+definitive guide for crypto quant ML — the techniques explicitly address
+the failure modes that simple walk-forward + Sharpe miss
+[Source: Lopez de Prado cheat sheet via NotebookLM backtest-data-sources,
+citation 5 — r/quant cheat sheet repository].
+
+**Combinatorial Purged Cross-Validation (CPCV):** Standard K-fold CV
+fails in finance because neighbouring data points are highly correlated
+(autocorrelated returns, overlapping label horizons). CPCV "purges"
+training-set rows that overlap with the test set (label leakage) AND
+"embargoes" a buffer period after the test set (information leakage).
+For a project with 5 OOS folds, CPCV produces a more conservative — and
+correct — generalization estimate than naive walk-forward.
+
+**Triple-Barrier labeling:** Classifies each event by which of three
+barriers hits first: an upper take-profit barrier, a lower stop-loss
+barrier, or a vertical time-limit barrier. Beats fixed-horizon labeling
+because it captures the intraday path, not just terminal return — a
+trade that hits TP in 2 hours is different from one that drifts to TP
+over 5 days, even if PnL is identical.
+
+**Meta-Labeling:** Train a *secondary* model whose only job is to
+decide "should we take this trade, and if so, how big?" given the
+primary model's signal. Boosts F1 by filtering whipsaw signals and
+calibrating bet size — particularly powerful for crypto where the
+primary signal often fires correctly but at unhelpful sizes.
+
+**Deflated Sharpe Ratio (DSR):** Corrects raw Sharpe for selection
+bias — if you tested 100 strategies, the best one will look great by
+chance alone. DSR requires tracking the number of trials AND the
+variance of Sharpe ratios across them; it tells you the true
+probability that the surviving strategy's edge is real, not luck.
+For this project's Iron Law 2 gate (Sharpe > 1.5), the gate should be
+read as **DSR > 1.5**, not raw Sharpe > 1.5 — otherwise hyperopt
+search will mechanically generate a "passing" strategy by chance.
+
+[Source: NotebookLM backtest-data-sources, citation 5 — Lopez de Prado
+methodology cheat sheet] [Source: NotebookLM backtest-data-sources,
+citation 51 — academic stop-out rules + serial correlation analysis]
+
+**Actionable rule for the brain:** When the operator reports a
+backtest passes the Iron Law 2 gate (Sharpe > 1.5, MaxDD < 25%, PF
+> 1.4 across 5 OOS folds), the brain MUST ask whether the gate was
+evaluated using DSR (Deflated Sharpe) or raw Sharpe. If raw Sharpe AND
+the operator did > 20 hyperparameter iterations to reach the
+passing version, the result is plausibly selection-bias artefact;
+demand DSR recomputation before clearing.
+
 ## Quick Decision Heuristics
 
 - If WFE ratio < 0.5, veto promotion to paper-trade — strategy is curve-fit.
@@ -135,3 +185,12 @@ a higher-frequency strategy.
 - If Monte Carlo trade-shuffle 5th percentile equity curve goes negative,
   the realized historical sequence may have been favourable luck — demand
   a longer IS window or alternative entry rule.
+- If raw Sharpe is the gate metric AND > 20 hyperopt iterations were run
+  to reach passing, demand DSR (Deflated Sharpe) recomputation —
+  selection-bias artefact is the default assumption, not the exception.
+- If ML strategy uses fixed-horizon labels (e.g. "1h forward return"),
+  reject in favor of Triple-Barrier labeling — fixed-horizon ignores
+  intraday path and misclassifies trades that hit SL before TP.
+- If standard K-fold CV is used instead of CPCV (purge + embargo) on
+  autocorrelated returns, OOS scores are inflated by label leakage —
+  demand CPCV re-run before gate.

@@ -122,10 +122,37 @@ session pattern, downgrade confidence by 1 point.
 day, treat as alt-season-precursor regime — accept altcoin breakout
 signals at lower confidence floor (≥ 5 instead of ≥ 6).
 
+## Topic 7 — Spot BTC ETF approval = structurally significant break (2024-01)
+
+A 2024 study using the **Chow Test** (p-value 0.004) confirmed a
+statistically significant structural break in Bitcoin's microstructure
+upon Spot BTC ETF approval [Source: Coinmonks Medium 2024 — "A Deep Dive
+into BTC ETF Microstructure" via NotebookLM backtest-data-sources
+citation 15]. The Information Coefficient (IC) — a measure of a signal's
+predictive power — shifted from near-zero to **consistently negative**
+post-approval, indicating the market transitioned from momentum-driven
+to a sustained mean-reversion regime.
+
+Practical consequence: a strategy backtested entirely on pre-2024 data
+that shows positive momentum IC will mechanically lose money post-2024
+unless the brain recognizes the regime flip. Walk-forward folds whose
+OOS windows all live pre-ETF (2018-01 → 2023-12) cannot validate
+post-ETF survival — at least one OOS fold must straddle 2024-01.
+
+**Actionable rule for the brain:** If the strategy's most recent
+backtest run has all OOS folds ending before 2024-01-11 (ETF approval
+date), demand a re-run with at least one fold whose test window
+spans 2024-01 → 2024-12 before clearing Iron Law 2 gate. A strategy
+whose 5-fold pass excludes the post-ETF regime is curve-fit to an
+extinct market structure.
+
 ## Quick Decision Heuristics
 
 - Risk-Off macro (F&G < 30, BTC dom rising, yields spiking) → reject new
   long-altcoin entries regardless of pair signal.
+- Strategy backtest OOS folds all end pre-2024-01-11 → reject Iron Law
+  2 clearance; demand re-run including post-ETF window (Chow Test
+  p=0.004 confirms regime break).
 - Realized 1h vol top-quartile + Bollinger extreme → "high-vol
   reversion" regime; favor reversion, veto breakout (confidence ≤ 7).
 - ±2h around FOMC/ECB → halve size_mult, veto continuation.

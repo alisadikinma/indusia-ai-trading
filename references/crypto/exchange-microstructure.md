@@ -99,10 +99,33 @@ position size unchanged but no fills logged in the last 30s during a high-vol
 window AND ws gap detector flagged a disconnect, treat as "execution
 state uncertain" — abstain (default veto) until OMS reports fresh state.
 
+## Topic 5 — Binance microsecond timestamp shift (2025-01-01)
+
+Binance Vision migrated all Spot data to **microsecond-level timestamps**
+on 2025-01-01. Pre-2025 data ships in millisecond precision; post-2025
+ships in microseconds [Source: NotebookLM backtest-data-sources, citation
+17 — github.com/binance/binance-public-data]. A backtester that hardcodes
+`%Y-%m-%dT%H:%M:%S.%f` parsing, or assumes a fixed string length, will
+silently produce sub-second misalignment when crossing the boundary.
+
+Cross-feed sync is the failure mode that bites first: stitching Spot
+(post-2025 μs) against Futures (still ms unless explicitly upgraded)
+produces 1ms-rounding ghost-arbitrage signals that don't exist live.
+Resampling to 1-minute candles masks this; tick-level backtests do not.
+
+**Actionable rule for the brain:** If a backtest report covers data
+spanning 2024-12 → 2025-02 boundary AND uses tick-level (not aggregated)
+data AND the strategy depends on cross-pair / cross-venue timing within
+< 100ms, demand the operator confirm the data loader handled both
+ms and μs precision before clearing Iron Law 2 gate.
+
 ## Quick Decision Heuristics
 
 - If funding rate flips sign with |Δ| > 50bp in 8h AND vol > 1σ, treat
   as mean-reversion trap; veto new continuation trades.
+- If backtest data crosses 2025-01-01 boundary AND uses tick-level Spot
+  data AND strategy depends on sub-second timing, require explicit
+  ms/μs handling confirmation before gate clear.
 - If PF drops > 30% after realistic maker/taker fees, reject the strategy
   output — the edge is friction-bound, not real.
 - Trust OMS-reported `signed_qty` over any locally-computed exposure;

@@ -96,9 +96,46 @@ top-of-book depth on a public-mempool RPC. Either route via private mempool /
 VeBloP, or split across N child orders sized < 5% each, with random jitter
 50–250ms between submissions.
 
+## Topic 4 — Historical extraction via Envio HyperSync (OrderFilled events)
+
+Polymarket's CLOB matches off-chain BUT settles on-chain — every
+executed fill emits an `OrderFilled` event on the Polygon settlement
+contract. This makes the **Polygon blockchain itself the canonical
+historical archive**: there is no need for a paid Polymarket data feed
+to reconstruct tick-by-tick history.
+
+**Envio HyperSync** is the production-grade ingestion path. It streams
+historical Polygon contract events at multi-thousand-events/sec
+throughput, far faster than direct RPC `eth_getLogs` calls that are
+rate-limited and pagination-bound on free tier providers
+[Source: NotebookLM backtest-data-sources, citation 47 — Envio
+HyperSync layer; citation 48 — Polymarket OrderFilled event indexing].
+For UMA dispute history specifically, Dune Analytics dashboards
+decoding `proposePrice` and `requestPrice` events on Polygon provide a
+ready-made query interface
+[Source: NotebookLM backtest-data-sources, citation 43 — UMA Voter App
+dispute history; citation 46 — Dune Analytics decode of UMA events].
+
+For the polymarket-bot's Phase 2 historical bulk ingestion, the
+recommended path is: Envio HyperSync → polymarket.markets +
+polymarket.signals tables, with UMA dispute history scraped from Dune
+into polymarket.markets.metadata JSONB. This sidesteps any dependence
+on Polymarket's hosted REST APIs (which are rate-limited and may
+deprecate) and gives the brain direct on-chain ground truth.
+
+**Actionable rule for the brain:** When the operator asks "what
+historical Polymarket data should we backtest against?", route to
+on-chain Envio HyperSync ingestion of OrderFilled events as the
+canonical source. Reject paid Polymarket data subscriptions as
+unnecessary unless the strategy needs sub-second off-chain CLOB book
+state (which on-chain settlement events do not preserve).
+
 ## Quick Decision Heuristics
 
 - If WebSocket delta latency > 500ms, halt new order placement and reconcile.
+- If a backtest sources Polymarket historical from a paid REST feed
+  rather than on-chain Envio HyperSync, flag for operator — the
+  on-chain path is canonical and free.
 - If priority-fee p90 > 30% of expected per-trade edge, skip taker leg, hold maker quote.
 - If a single taker order would consume > 5% of top-of-book depth, split into child orders or route via private mempool.
 - If `py-clob-client-v2` returns 401 mid-session, rotate HMAC creds and re-derive — do not retry on stale keys.
