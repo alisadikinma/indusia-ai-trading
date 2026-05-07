@@ -28,12 +28,27 @@ What it does:
   4. Persists every epoch to ``brain.hyperopt_results``.
   5. Prints the top-3 by loss at exit.
 
-Usage::
+Usage (sweep mode — random search)::
 
     set -a; source .env; set +a
     python -m infra.scripts.run_hyperopt --pair BTC/USDT \\
         --timerange-start 2024-01-01 --timerange-end 2024-07-01 \\
         --epochs 50 --run-id smoke-001
+
+Usage (replay mode — fixed parameter sets, added 2026-05-07 per ADR-003 §5
+spec-review fix)::
+
+    python -m infra.scripts.run_hyperopt --pair BTC/USDT \\
+        --timerange-start 2024-07-01 --timerange-end 2025-01-01 \\
+        --replay-params infra/scripts/replay_inputs/oos_replay_001_smoke_top3.json \\
+        --replay-run-id oos-replay-001
+
+Replay mode reads a JSON array of fixed parameter dicts and evaluates each
+ONCE on the configured timerange (no random sampling, no --epochs). One
+row is persisted per input set with ``epoch`` = ordinal index of the set.
+Use this for OOS replay of IS-top-K sets so the resulting rows in
+``brain.hyperopt_results`` are the canonical reproducible source for ADR
+narrative tables (see ADR-003 §5).
 
 Caveats baked in (and documented in ADR-003):
 
@@ -300,6 +315,78 @@ def _persist_epoch(
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
+def _load_replay_param_sets(path: Path) -> list[ParamSet]:
+    """Load a JSON array of fixed parameter dicts and validate each into
+    a :class:`ParamSet`. Raises ``SystemExit`` with a clear message on
+    invalid input — no silent coercion (Iron Law 3).
+    """
+    if not path.is_file():
+        raise SystemExit(f"--replay-params file not found: {path}")
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise SystemExit(f"--replay-params file is not valid JSON: {exc}") from exc
+    if not isinstance(raw, list) or not raw:
+        raise SystemExit(
+            f"--replay-params must be a non-empty JSON array of parameter dicts, got: {type(raw).__name__}"
+        )
+    required = {
+        "buy_ema_fast",
+        "buy_ema_slow",
+        "buy_adx_threshold",
+        "buy_pred_threshold",
+        "sell_atr_mult",
+    }
+    out: list[ParamSet] = []
+    for i, entry in enumerate(raw):
+        if not isinstance(entry, dict):
+            raise SystemExit(
+                f"--replay-params entry #{i+1} must be an object, got: {type(entry).__name__}"
+            )
+        missing = required - entry.keys()
+        if missing:
+            raise SystemExit(
+                f"--replay-params entry #{i+1} missing keys: {sorted(missing)}"
+            )
+        out.append(
+            ParamSet(
+                buy_ema_fast=int(entry["buy_ema_fast"]),
+                buy_ema_slow=int(entry["buy_ema_slow"]),
+                buy_adx_threshold=int(entry["buy_adx_threshold"]),
+                buy_pred_threshold=float(entry["buy_pred_threshold"]),
+                sell_atr_mult=float(entry["sell_atr_mult"]),
+            )
+        )
+    return out
+
+
+def _evaluate_param_set(
+    df_raw: pd.DataFrame,
+    params: ParamSet,
+    *,
+    timerange_start: datetime,
+    timerange_end: datetime,
+    starting_balance: float,
+) -> tuple[float, float | None, dict]:
+    """Single-pass evaluation of one parameter set on pre-loaded OHLCV.
+
+    Reuses :func:`_apply_indicators`, :func:`_backtest`, :func:`_compute_metrics`
+    and the real :class:`SharpeHyperOptLoss.hyperopt_loss_function` — no
+    duplicated scoring logic. Returns ``(loss, sharpe_or_None, metrics_dict)``.
+    """
+    df_with_ind = _apply_indicators(df_raw, params)
+    trades = _backtest(df_with_ind, params, starting_balance)
+    metrics = _compute_metrics(trades, starting_balance)
+    loss = SharpeHyperOptLoss.hyperopt_loss_function(
+        results=trades,
+        min_date=timerange_start,
+        max_date=timerange_end,
+        starting_balance=starting_balance,
+    )
+    sharpe = -loss if metrics["total_trades"] > 0 else None
+    return loss, sharpe, metrics
+
+
 def main() -> int:
     p = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -315,10 +402,92 @@ def main() -> int:
         help="Tag for this sweep. Defaults to a timestamp-uuid suffix.",
     )
     p.add_argument("--seed", type=int, default=42)
+    p.add_argument(
+        "--replay-params",
+        default=None,
+        help=(
+            "Path to a JSON array of fixed parameter dicts. When provided, the "
+            "runner enters replay mode: each set in the array is evaluated ONCE "
+            "on the configured timerange (no random sampling, --epochs ignored) "
+            "and persisted to brain.hyperopt_results with epoch = ordinal index. "
+            "Required companion: --replay-run-id."
+        ),
+    )
+    p.add_argument(
+        "--replay-run-id",
+        default=None,
+        help=(
+            "Required when --replay-params is set. Tags every replay row with "
+            "this run_id for audit-trail reproducibility."
+        ),
+    )
     args = p.parse_args()
 
     timerange_start = datetime.fromisoformat(args.timerange_start).replace(tzinfo=timezone.utc)
     timerange_end = datetime.fromisoformat(args.timerange_end).replace(tzinfo=timezone.utc)
+
+    # ----- Replay mode branch -------------------------------------------------
+    if args.replay_params is not None:
+        if not args.replay_run_id:
+            raise SystemExit(
+                "--replay-run-id is REQUIRED when --replay-params is set "
+                "(replay mode must produce a stable, operator-chosen run_id "
+                "for audit-trail reproducibility — Iron Law 3 / ADR-003 §5)."
+            )
+        param_sets = _load_replay_param_sets(Path(args.replay_params))
+        run_id = args.replay_run_id
+        print(f"[run_hyperopt] REPLAY mode  run_id={run_id} pair={args.pair} sets={len(param_sets)}")
+        print(f"               window=[{timerange_start.date()} -> {timerange_end.date()})")
+        print(f"               starting_balance={args.starting_balance}")
+
+        print("[1/3] Loading & resampling OHLCV from Postgres")
+        with _connect() as conn:
+            df_raw = _load_ohlcv_15m(conn, args.pair, timerange_start, timerange_end)
+        print(f"      loaded {len(df_raw):,} 15m bars")
+
+        print("[2/3] Replaying fixed parameter sets")
+        with _connect() as conn:
+            for epoch, params in enumerate(param_sets, start=1):
+                loss, sharpe, metrics = _evaluate_param_set(
+                    df_raw,
+                    params,
+                    timerange_start=timerange_start,
+                    timerange_end=timerange_end,
+                    starting_balance=args.starting_balance,
+                )
+                _persist_epoch(
+                    conn,
+                    run_id=run_id,
+                    epoch=epoch,
+                    params=params,
+                    loss=loss,
+                    sharpe=sharpe,
+                    metrics=metrics,
+                    timerange_start=timerange_start,
+                    timerange_end=timerange_end,
+                )
+                print(
+                    f"      set {epoch:>3}/{len(param_sets)} loss={loss:+.4f} "
+                    f"trades={metrics['total_trades']} "
+                    f"sharpe={sharpe if sharpe is None else f'{sharpe:+.2f}'} "
+                    f"params={asdict(params)}"
+                )
+
+        print("[3/3] Replay complete")
+        print(f"\nrun_id={run_id} — query rows from Postgres:")
+        print(
+            f"  psql trading -c \"SELECT epoch, loss, sharpe, parameters, total_trades "
+            f"FROM brain.hyperopt_results WHERE run_id='{run_id}' "
+            f"ORDER BY epoch ASC;\""
+        )
+        return 0
+
+    # ----- Sweep (random search) mode — original behaviour --------------------
+    if args.replay_run_id:
+        raise SystemExit(
+            "--replay-run-id may only be used with --replay-params. "
+            "For sweep mode use --run-id."
+        )
 
     run_id = args.run_id or f"sweep-{datetime.now(tz=timezone.utc).strftime('%Y%m%dT%H%M%S')}-{uuid.uuid4().hex[:6]}"
     rng = random.Random(args.seed)
@@ -337,16 +506,13 @@ def main() -> int:
     with _connect() as conn:
         for epoch in range(1, args.epochs + 1):
             params = _sample_params(rng)
-            df_with_ind = _apply_indicators(df_raw, params)
-            trades = _backtest(df_with_ind, params, args.starting_balance)
-            metrics = _compute_metrics(trades, args.starting_balance)
-            loss = SharpeHyperOptLoss.hyperopt_loss_function(
-                results=trades,
-                min_date=timerange_start,
-                max_date=timerange_end,
+            loss, sharpe, metrics = _evaluate_param_set(
+                df_raw,
+                params,
+                timerange_start=timerange_start,
+                timerange_end=timerange_end,
                 starting_balance=args.starting_balance,
             )
-            sharpe = -loss if metrics["total_trades"] > 0 else None
             _persist_epoch(
                 conn,
                 run_id=run_id,

@@ -131,18 +131,49 @@ seed=42, $1k starting balance) — top-3:
 | #2   | +3.35  | 222    | 1.54          | -9.0%  | 11       | 54       | 22  | 0.73 | 2.79     |
 | #3   | +3.30  | 223    | 1.53          | -7.8%  | 13       | 64       | 22  | 0.66 | 2.74     |
 
-Out-of-sample replay on 2024-07-01 → 2025-01-01 (window the smoke did
-NOT see during sweep):
+Out-of-sample REPLAY on 2024-07-01 → 2025-01-01 (window the smoke did
+NOT see during sweep). The IS-top-3 parameter sets above were re-run
+verbatim — no resampling — over the OOS window via the runner's
+``--replay-params`` mode (added 2026-05-07 as the spec-review fix to
+this ADR; see "Reproducibility" note below). Rows persisted under
+``run_id='oos-replay-001'`` (epochs 1, 2, 3 = ranks #1, #2, #3 above):
 
-| Rank | Sharpe (OOS) | Trades | Profit Factor (OOS) | Max DD (OOS) |
-|------|--------------|--------|---------------------|---------------|
-| #1   | +2.64        | 432    | 1.20                | -10.7%        |
-| #2   | +2.04        | 230    | 1.29                | -8.2%         |
-| #3   | +1.77        | 228    | 1.24                | -10.9%        |
+| Rank | Sharpe (OOS) | Trades | Profit Factor (OOS) | Max DD (OOS) | Win rate |
+|------|--------------|--------|---------------------|---------------|----------|
+| #1   | +2.64        | 432    | 1.20                | -10.7%        | 36.3%    |
+| #2   | +2.04        | 230    | 1.29                |  -8.2%        | 38.7%    |
+| #3   | +1.77        | 228    | 1.24                | -10.9%        | 41.2%    |
+
+**Reproducibility (added 2026-05-07 spec-review fix):** prior to this
+revision, the OOS table presented narrative numbers that were not
+derivable from any row in ``brain.hyperopt_results`` — the sibling run
+``oos-001`` is an *independent* random sweep over the OOS window (30
+epochs with different params), not a fixed-params replay. The runner now
+supports a ``--replay-params <json> --replay-run-id <id>`` mode (see
+``infra/scripts/run_hyperopt.py``); the IS-top-3 sets were exported to
+``infra/scripts/replay_inputs/oos_replay_001_smoke_top3.json`` and
+re-run via:
+
+```bash
+python infra/scripts/run_hyperopt.py \
+    --pair BTC/USDT \
+    --timerange-start 2024-07-01 --timerange-end 2025-01-01 \
+    --replay-params infra/scripts/replay_inputs/oos_replay_001_smoke_top3.json \
+    --replay-run-id oos-replay-001
+```
+
+The 3 rows in ``brain.hyperopt_results`` for ``run_id='oos-replay-001'``
+are now the canonical source for the OOS table above; query via
+``SELECT epoch, sharpe, total_trades, profit_factor, max_dd, win_rate,
+parameters FROM brain.hyperopt_results WHERE run_id='oos-replay-001'
+ORDER BY epoch ASC;``.
 
 **Verification gate satisfied:** All 3 IS-top sets show OOS Sharpe > 1.0
 (plan §Phase 8 verification line 793). #1 is the most robust (OOS Sharpe
-2.64, fewest sign-changes between IS and OOS).
+2.64, fewest sign-changes between IS and OOS). The independent random
+sweep ``oos-001`` (top-3 OOS Sharpe 2.53 / 1.34 / 1.22) provides a
+secondary cross-check on the same window with different params; both
+runs satisfy the gate.
 
 ### 6. Chosen set (provisional)
 
@@ -299,8 +330,13 @@ the VPS handoff.
 - HyperOpt class: `crypto-bot/freqtrade-config/hyperopts/ClaudeOversightHyperopt.py`
 - Runner: `infra/scripts/run_hyperopt.py`
 - Tests: `tests/test_hyperopt_param_wrapping.py`,
-  `tests/test_hyperopt_loss_function.py`
+  `tests/test_hyperopt_loss_function.py`,
+  `tests/test_hyperopt_replay_mode.py` (added 2026-05-07 spec-review fix)
+- Replay input (IS-top-3 from smoke-001):
+  `infra/scripts/replay_inputs/oos_replay_001_smoke_top3.json`
 - Smoke run_id (`smoke-001`) results: queryable via
   `SELECT * FROM brain.hyperopt_results WHERE run_id='smoke-001' ORDER BY loss ASC;`
-- OOS run_id (`oos-001`) results: queryable via
+- OOS independent-sweep run_id (`oos-001`) results: queryable via
   `SELECT * FROM brain.hyperopt_results WHERE run_id='oos-001' ORDER BY loss ASC;`
+- OOS fixed-params replay run_id (`oos-replay-001`, the canonical source for §5
+  OOS table): `SELECT * FROM brain.hyperopt_results WHERE run_id='oos-replay-001' ORDER BY epoch ASC;`

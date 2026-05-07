@@ -1,0 +1,23 @@
+[
+  {
+    "buy_ema_fast": 13,
+    "buy_ema_slow": 74,
+    "buy_adx_threshold": 22,
+    "buy_pred_threshold": 0.67,
+    "sell_atr_mult": 1.55
+  },
+  {
+    "buy_ema_fast": 11,
+    "buy_ema_slow": 54,
+    "buy_adx_threshold": 22,
+    "buy_pred_threshold": 0.73,
+    "sell_atr_mult": 2.79
+  },
+  {
+    "buy_ema_fast": 13,
+    "buy_ema_slow": 64,
+    "buy_adx_threshold": 22,
+    "buy_pred_threshold": 0.66,
+    "sell_atr_mult": 2.74
+  }
+]
