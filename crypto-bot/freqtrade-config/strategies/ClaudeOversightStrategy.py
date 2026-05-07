@@ -36,6 +36,7 @@ import psycopg
 import talib.abstract as ta
 
 from freqtrade.persistence import Trade
+from freqtrade.strategy import DecimalParameter, IntParameter
 from freqtrade.strategy.interface import IStrategy
 
 
@@ -98,10 +99,41 @@ class ClaudeOversightStrategy(IStrategy):
     # Need EMA50 + ADX14 warmup; round up generously.
     startup_candle_count: int = 100
 
+    # ----- Phase 8 hyperoptable parameters --------------------------------
+    # Wrapped so freqtrade hyperopt (or our custom run_hyperopt.py runner)
+    # can search the space. Defaults match the Phase 3 rule-set (EMA 20/50,
+    # ADX>25, ATR*2 trailing, prediction>0.65) so a plain backtest with
+    # no params.json file replicates legacy behavior.
+    #
+    # See docs/decisions/2026-05-07-003-strategy-v1-hyperopt-params.md for
+    # range justifications and the chosen-set decision.
+    buy_ema_fast = IntParameter(
+        low=10, high=25, default=20, space="buy", optimize=True, load=True
+    )
+    buy_ema_slow = IntParameter(
+        low=40, high=80, default=50, space="buy", optimize=True, load=True
+    )
+    buy_adx_threshold = IntParameter(
+        low=20, high=35, default=25, space="buy", optimize=True, load=True
+    )
+    buy_pred_threshold = DecimalParameter(
+        low=0.55, high=0.75, default=0.65, decimals=2,
+        space="buy", optimize=True, load=True,
+    )
+    sell_atr_mult = DecimalParameter(
+        low=1.5, high=3.0, default=2.0, decimals=2,
+        space="sell", optimize=True, load=True,
+    )
+
     # ----- indicators ------------------------------------------------------
     def populate_indicators(self, dataframe: pd.DataFrame, metadata: dict) -> pd.DataFrame:
-        dataframe["ema20"] = ta.EMA(dataframe, timeperiod=20)
-        dataframe["ema50"] = ta.EMA(dataframe, timeperiod=50)
+        # Use parameter-driven periods so hyperopt sweeps actually shift the
+        # EMA crossover. ``.value`` returns the current point in the search
+        # (or the loaded best from params file when running plain backtest).
+        ema_fast_period = int(self.buy_ema_fast.value)
+        ema_slow_period = int(self.buy_ema_slow.value)
+        dataframe["ema20"] = ta.EMA(dataframe, timeperiod=ema_fast_period)
+        dataframe["ema50"] = ta.EMA(dataframe, timeperiod=ema_slow_period)
         dataframe["adx14"] = ta.ADX(dataframe, timeperiod=14)
         dataframe["atr14"] = ta.ATR(dataframe, timeperiod=14)
         return dataframe
@@ -184,12 +216,14 @@ class ClaudeOversightStrategy(IStrategy):
         else:
             freqai_gate = pd.Series(1.0, index=dataframe.index)
 
+        adx_th = int(self.buy_adx_threshold.value)
+        pred_th = float(self.buy_pred_threshold.value)
         cond = (
             (dataframe["ema20"] > dataframe["ema50"])
-            & (dataframe["adx14"] > 25)
+            & (dataframe["adx14"] > adx_th)
             & (dataframe["close"] > dataframe["ema20"])
             & (dataframe["volume"] > 0)
-            & (freqai_gate > 0.65)
+            & (freqai_gate > pred_th)
         )
         dataframe.loc[cond, "enter_long"] = 1
         # Use explicit tag so backtest analytics can distinguish Phase 3
@@ -230,7 +264,8 @@ class ClaudeOversightStrategy(IStrategy):
         latest_atr = df["atr14"].iloc[-1]
         if pd.isna(latest_atr) or latest_atr <= 0 or current_rate <= 0:
             return None
-        atr_pct = (2.0 * float(latest_atr)) / float(current_rate)
+        atr_mult = float(self.sell_atr_mult.value)
+        atr_pct = (atr_mult * float(latest_atr)) / float(current_rate)
         return -atr_pct
 
     # ----- entry confirmation (writes signal + reads Claude veto) ----------
