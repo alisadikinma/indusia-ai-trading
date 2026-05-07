@@ -807,3 +807,186 @@ async def test_iteration_runs_returns_seeded(
     body = r.json()
     assert len(body) == 1
     assert body[0]["run_type"] == "iteration"
+
+
+@pytest.mark.asyncio
+async def test_iteration_runs_filter_by_outcome(
+    app_client: AsyncClient, auth_headers: dict[str, str], clean_db: asyncpg.Pool
+) -> None:
+    """outcome= filter returns only rows matching that outcome."""
+    async with clean_db.acquire() as conn:
+        await conn.execute(
+            """
+            INSERT INTO brain.iteration_runs (run_type, outcome)
+            VALUES
+                ('iteration', 'PASS'),
+                ('iteration', 'FAIL_RETRY'),
+                ('post_mortem', 'PASS')
+            """
+        )
+    r = await app_client.get(
+        "/dashboard/iteration-runs",
+        params={"outcome": "PASS"},
+        headers=auth_headers,
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert len(body) == 2
+    assert all(row["outcome"] == "PASS" for row in body)
+
+
+@pytest.mark.asyncio
+async def test_iteration_runs_filter_by_outcome_csv(
+    app_client: AsyncClient, auth_headers: dict[str, str], clean_db: asyncpg.Pool
+) -> None:
+    """outcome CSV (e.g. PASS,FAIL_RETRY) returns rows matching any value."""
+    async with clean_db.acquire() as conn:
+        await conn.execute(
+            """
+            INSERT INTO brain.iteration_runs (run_type, outcome)
+            VALUES
+                ('iteration', 'PASS'),
+                ('iteration', 'FAIL_RETRY'),
+                ('iteration', 'FAIL_ESCALATE')
+            """
+        )
+    r = await app_client.get(
+        "/dashboard/iteration-runs",
+        params={"outcome": "PASS,FAIL_RETRY"},
+        headers=auth_headers,
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert len(body) == 2
+    outcomes = {row["outcome"] for row in body}
+    assert outcomes == {"PASS", "FAIL_RETRY"}
+
+
+@pytest.mark.asyncio
+async def test_iteration_runs_filter_by_date_range(
+    app_client: AsyncClient, auth_headers: dict[str, str], clean_db: asyncpg.Pool
+) -> None:
+    """from= / to= filter by started_at range."""
+    async with clean_db.acquire() as conn:
+        now = datetime.now(timezone.utc)
+        await conn.execute(
+            """
+            INSERT INTO brain.iteration_runs (run_type, started_at, outcome)
+            VALUES
+                ('iteration', $1, 'PASS'),
+                ('post_mortem', $2, 'PASS')
+            """,
+            now - timedelta(days=10),
+            now - timedelta(days=2),
+        )
+    # Request only the last 5 days.
+    from_ts = (datetime.now(timezone.utc) - timedelta(days=5)).isoformat()
+    r = await app_client.get(
+        "/dashboard/iteration-runs",
+        params={"from": from_ts},
+        headers=auth_headers,
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert len(body) == 1
+    assert body[0]["run_type"] == "post_mortem"
+
+
+@pytest.mark.asyncio
+async def test_iteration_runs_malformed_timestamp_returns_400(
+    app_client: AsyncClient, auth_headers: dict[str, str]
+) -> None:
+    """Malformed from= timestamp must return 400, not a silent skip (Iron Law 3)."""
+    r = await app_client.get(
+        "/dashboard/iteration-runs",
+        params={"from": "not-a-date"},
+        headers=auth_headers,
+    )
+    assert r.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_iteration_runs_unknown_outcome_returns_empty_list(
+    app_client: AsyncClient, auth_headers: dict[str, str], clean_db: asyncpg.Pool
+) -> None:
+    """An outcome= value that does not match any row returns 200 [].
+
+    Documented behaviour: the backend does not validate filter values against
+    the schema CHECK constraint at SELECT time (CHECK fires on INSERT/UPDATE).
+    An unrecognised value simply matches nothing — no 422, no 400. This test
+    pins that contract so a future "validate against allowed values" change is
+    a deliberate decision, not an accident.
+    """
+    async with clean_db.acquire() as conn:
+        await conn.execute(
+            """
+            INSERT INTO brain.iteration_runs (run_type, outcome)
+            VALUES ('iteration', 'PASS'), ('iteration', 'FAIL_RETRY')
+            """
+        )
+    r = await app_client.get(
+        "/dashboard/iteration-runs",
+        params={"outcome": "NOT_A_REAL_VALUE"},
+        headers=auth_headers,
+    )
+    assert r.status_code == 200
+    assert r.json() == []
+
+
+@pytest.mark.asyncio
+async def test_iteration_runs_filter_by_failure_mode(
+    app_client: AsyncClient, auth_headers: dict[str, str], clean_db: asyncpg.Pool
+) -> None:
+    """failure_mode= filter returns only rows matching that label."""
+    async with clean_db.acquire() as conn:
+        await conn.execute(
+            """
+            INSERT INTO brain.iteration_runs (run_type, failure_mode, outcome)
+            VALUES
+                ('iteration', 'overfit', 'FAIL_RETRY'),
+                ('iteration', 'underfit', 'FAIL_RETRY'),
+                ('iteration', 'overfit', 'PASS')
+            """
+        )
+    r = await app_client.get(
+        "/dashboard/iteration-runs",
+        params={"failure_mode": "overfit"},
+        headers=auth_headers,
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert len(body) == 2
+    assert all(row["failure_mode"] == "overfit" for row in body)
+
+
+@pytest.mark.asyncio
+async def test_iteration_runs_filter_by_run_type(
+    app_client: AsyncClient, auth_headers: dict[str, str], clean_db: asyncpg.Pool
+) -> None:
+    """run_type= filter restricts to the named type."""
+    async with clean_db.acquire() as conn:
+        await conn.execute(
+            """
+            INSERT INTO brain.iteration_runs (run_type, outcome)
+            VALUES
+                ('iteration', 'PASS'),
+                ('post_mortem', 'PASS'),
+                ('health_check', 'PASS')
+            """
+        )
+    r = await app_client.get(
+        "/dashboard/iteration-runs",
+        params={"run_type": "post_mortem"},
+        headers=auth_headers,
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert len(body) == 1
+    assert body[0]["run_type"] == "post_mortem"
+
+
+@pytest.mark.asyncio
+async def test_iteration_runs_requires_auth(app_client: AsyncClient) -> None:
+    """Unauthenticated request must return 401."""
+    r = await app_client.get("/dashboard/iteration-runs")
+    assert r.status_code == 401

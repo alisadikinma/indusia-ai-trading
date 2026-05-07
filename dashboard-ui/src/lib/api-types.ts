@@ -226,6 +226,48 @@ export interface IterationRun {
   summary: string | null;
 }
 
+// ---------------------------------------------------------------------------
+// Iteration History filter types (Phase 1.5.G2)
+// ---------------------------------------------------------------------------
+
+export const ITERATION_RUN_TYPES = [
+  "all",
+  "iteration",
+  "post_mortem",
+  "health_check",
+] as const;
+export type IterationRunType = (typeof ITERATION_RUN_TYPES)[number];
+
+export const ITERATION_OUTCOMES = [
+  "all",
+  "PASS",
+  "FAIL_RETRY",
+  "FAIL_ESCALATE",
+  "IN_PROGRESS",
+] as const;
+export type IterationOutcome = (typeof ITERATION_OUTCOMES)[number];
+
+// failure_mode is free text in the schema, but the post-mortem cron uses
+// these canonical labels. 'all' is a UI-only sentinel meaning "no filter".
+export const ITERATION_FAILURE_MODES = [
+  "all",
+  "overfit",
+  "underfit",
+  "strategy_logic",
+  "regime_specific",
+  "hyperopt_unstable",
+] as const;
+export type IterationFailureMode = (typeof ITERATION_FAILURE_MODES)[number];
+
+// Filter contract — mirrors GET /dashboard/iteration-runs query params.
+export interface IterationFilters {
+  run_type?: Exclude<IterationRunType, "all"> | "";
+  outcome?: Exclude<IterationOutcome, "all"> | "";
+  failure_mode?: Exclude<IterationFailureMode, "all"> | "";
+  from?: string;
+  to?: string;
+}
+
 export interface WsMessage {
   channel?: "dashboard_signals" | "dashboard_journal" | "dashboard_equity" | "dashboard_freqai";
   payload?: unknown;

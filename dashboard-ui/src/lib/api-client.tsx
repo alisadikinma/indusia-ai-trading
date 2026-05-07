@@ -25,6 +25,7 @@ import type {
   FreqaiCalibration,
   FreqaiHistoryRow,
   FreqaiPredictionHistogram,
+  IterationFilters,
   IterationRun,
   JournalPage,
   OhlcvPoint,
@@ -328,10 +329,20 @@ export function useRisk(options?: HookOpts<RiskState>) {
   });
 }
 
-export function useIterations(options?: HookOpts<IterationRun[]>) {
+export function useIterations(
+  filters: IterationFilters,
+  options?: HookOpts<IterationRun[]>,
+) {
+  const sp: Record<string, string | number | undefined> = {};
+  if (filters.run_type) sp.run_type = filters.run_type;
+  if (filters.outcome) sp.outcome = filters.outcome;
+  if (filters.failure_mode) sp.failure_mode = filters.failure_mode;
+  if (filters.from) sp.from = filters.from;
+  if (filters.to) sp.to = filters.to;
   return useQuery<IterationRun[], Error, IterationRun[], readonly unknown[]>({
-    queryKey: ["iterations"],
-    queryFn: () => apiFetch<IterationRun[]>("/dashboard/iteration-runs"),
+    queryKey: ["iterations", filters],
+    queryFn: () =>
+      apiFetch<IterationRun[]>("/dashboard/iteration-runs", { searchParams: sp }),
     ...options,
   });
 }
