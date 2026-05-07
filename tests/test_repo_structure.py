@@ -150,6 +150,78 @@ def test_global_trading_config_exists_with_required_sections() -> None:
     )
 
 
+# ---------------------------------------------------------------------------
+# Distilled references (Phases G, H, I)
+# ---------------------------------------------------------------------------
+
+CRYPTO_REFERENCE_FILES = (
+    "exchange-microstructure.md",
+    "freqtrade-walkforward.md",
+    "known-failure-modes.md",
+    "regime-taxonomy.md",
+)
+
+POLYMARKET_REFERENCE_FILES = (
+    "clob-microstructure.md",
+    "uma-oracle-risk.md",
+    "edge-sources.md",
+    "regulatory-cftc.md",
+    "known-failure-modes.md",
+)
+
+SHARED_REFERENCE_FILES = (
+    "walk-forward-methodology.md",
+    "kelly-criterion.md",
+    "claude-oversight-pattern.md",
+)
+
+
+def _assert_reference_quality(file_path: Path, min_chars: int = 2500) -> None:
+    """A distilled reference file must be substantive, citation-grounded, and
+    anti-placeholder. Used by all three distillation tests."""
+    assert file_path.is_file(), f"{file_path.relative_to(REPO_ROOT)} missing"
+    body = file_path.read_text(encoding="utf-8")
+    rel = file_path.relative_to(REPO_ROOT)
+    assert len(body) >= min_chars, (
+        f"{rel} too thin ({len(body)} chars, need >={min_chars})"
+    )
+    # At least 3 ## headings (topic sections)
+    heading_count = sum(1 for line in body.splitlines() if line.startswith("## "))
+    assert heading_count >= 3, (
+        f"{rel} has only {heading_count} '## ' headings, need >=3 topic sections"
+    )
+    # Quick Decision Heuristics section (used by compile script)
+    assert "## Quick Decision Heuristics" in body, (
+        f"{rel} missing '## Quick Decision Heuristics' section"
+    )
+    # Citation discipline: at least 3 citation markers
+    citation_count = body.count("[Source:")
+    assert citation_count >= 3, (
+        f"{rel} has only {citation_count} '[Source:' citations, need >=3"
+    )
+    # Anti-placeholder grep (per Phase F + ADR-002)
+    placeholder_markers = ["[TODO]", "TODO:", "Lorem ipsum", "FIXME", "XXX:"]
+    found_placeholders = [m for m in placeholder_markers if m in body]
+    assert not found_placeholders, (
+        f"{rel} contains placeholder markers: {found_placeholders}"
+    )
+
+
+@pytest.mark.parametrize("filename", CRYPTO_REFERENCE_FILES)
+def test_crypto_reference_files_exist_and_substantive(filename: str) -> None:
+    _assert_reference_quality(REPO_ROOT / "references" / "crypto" / filename)
+
+
+@pytest.mark.parametrize("filename", POLYMARKET_REFERENCE_FILES)
+def test_polymarket_reference_files_exist_and_substantive(filename: str) -> None:
+    _assert_reference_quality(REPO_ROOT / "references" / "polymarket" / filename)
+
+
+@pytest.mark.parametrize("filename", SHARED_REFERENCE_FILES)
+def test_shared_reference_files_exist_and_substantive(filename: str) -> None:
+    _assert_reference_quality(REPO_ROOT / "references" / "shared" / filename)
+
+
 def test_freqtrade_submodule_is_populated() -> None:
     """freqtrade-fork/ must be a populated git submodule, not an empty dir."""
     freqtrade_dir = REPO_ROOT / "freqtrade-fork"
@@ -164,7 +236,8 @@ def test_freqtrade_submodule_is_populated() -> None:
 
 
 def test_claude_md_has_mandatory_sections() -> None:
-    """CLAUDE.md must contain the 6 mandatory sections per plan Phase 0 step 6."""
+    """CLAUDE.md must contain the original 6 mandatory sections plus the
+    2 new multi-bot sections added in Phase K of the 2026-05-07 restructure plan."""
     claude_md = (REPO_ROOT / "CLAUDE.md").read_text(encoding="utf-8")
     required_headings = [
         "## Project Goal",
@@ -173,9 +246,16 @@ def test_claude_md_has_mandatory_sections() -> None:
         "## Anti-Placeholder Rules",
         "## Debugging Checklist",
         "## Iron Laws",
+        # Phase K additions (multi-bot, references RAG layer):
+        "## Multi-Bot Boundaries",
+        "## References Layer",
     ]
     missing = [h for h in required_headings if h not in claude_md]
     assert not missing, f"CLAUDE.md missing required sections: {missing}"
+    # Iron Law 4 must explicitly extend to references/ per ADR-002:
+    assert "references/" in claude_md, (
+        "CLAUDE.md must mention references/ (Iron Law 4 read-only extension per ADR-002)"
+    )
 
 
 def test_gitignore_covers_secrets_and_logs() -> None:

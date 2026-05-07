@@ -4,6 +4,8 @@
 
 This file is loaded automatically by Claude Code CLI at the start of every session. It encodes the architecture, conventions, anti-placeholder rules, and Iron Laws that govern this project. The full design + 16-phase implementation plan lives in [`docs/plans/2026-05-06-ai-trading-247.md`](docs/plans/2026-05-06-ai-trading-247.md) — read that for context on **why**; this file is **how**.
 
+This is a **mono-repo for two trading bots** per [ADR-001](docs/decisions/2026-05-07-001-mono-repo-multi-bot.md): `crypto-bot/` (Binance + Blofin via Freqtrade body, schema `brain.*`) and `polymarket-bot/` (Polymarket via py-clob-client body, schema `polymarket.*`). The `references/` RAG layer per [ADR-002](docs/decisions/2026-05-07-002-references-rag-layer.md) is a fifth knowledge surface beyond skills/memory/journal/ML, injected per cycle via `--append-system-prompt-file`.
+
 ---
 
 ## Project Goal
@@ -24,34 +26,43 @@ The brain is observed via a **Bot Cockpit UI** (Next.js + TradingView Lightweigh
 ## Architecture
 
 ```
-┌──────────────────────────────────────────────────────────────────────┐
-│  VPS Hetzner CX22 — Frankfurt EU                                      │
-│                                                                        │
-│  Claude Code CLI (oversight brain) ──── 5-min Routines                 │
-│         │                                                              │
-│         │ HMAC-signed JSON over Unix socket                            │
-│         ▼                                                              │
-│  pulse-bridge/ (FastAPI shim)  ◄────  dashboard-ui/ (Next.js, port 3000)│
-│         │                                ▲                             │
-│         ▼                                │ JWT + Tailscale-only access  │
-│  freqtrade-fork/ ──── CCXT ──── Binance + Blofin                       │
-│         │                                                              │
-│         ▼                                                              │
-│  Postgres 16 + TimescaleDB (port 127.0.0.1:5432, no public exposure)   │
-│         │                                                              │
-│         ▼                                                              │
-│  Telegram bot (alerts + HMAC kill-switch)                              │
-└──────────────────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────────────┐
+│  VPS Hetzner CX22 — Frankfurt EU                                        │
+│                                                                          │
+│  Claude Code CLI (oversight brain) ──── 5-min Routines per bot           │
+│         │                                                                │
+│         │ HMAC-signed JSON over Unix socket  +  --append-system-prompt-  │
+│         │ file references/<bot>/compiled/refs-<bot>-decision.md (RAG)    │
+│         ▼                                                                │
+│  pulse-bridge/ (FastAPI: /v1/crypto/*, /v1/polymarket/*, /dashboard/*)   │
+│         │                                ▲                               │
+│         ▼                                │ Tailscale + JWT                │
+│  ┌──────────────────┐    ┌──────────────────┐   dashboard-ui/ (Next.js,  │
+│  │ crypto-bot/       │    │ polymarket-bot/   │   bot switcher tab)       │
+│  │ freqtrade-fork/   │    │ clob-client/      │                          │
+│  │ CCXT → Binance    │    │ py-clob-client →  │                          │
+│  │      + Blofin     │    │   Polymarket CLOB │                          │
+│  └──────────────────┘    └──────────────────┘                            │
+│         │                          │                                     │
+│         ▼                          ▼                                     │
+│  Postgres 16 + TimescaleDB (one host, schema-isolated):                  │
+│    brain.*       ← crypto-bot (legacy schema name kept per ADR-001)      │
+│    polymarket.*  ← polymarket-bot                                        │
+│         │                                                                │
+│         ▼                                                                │
+│  Telegram bot (alerts + HMAC kill-switch, shared)                        │
+└────────────────────────────────────────────────────────────────────────┘
 ```
 
-**The brain knows 4 things** (Claude Code CLI knowledge anatomy):
+**The brain knows 5 things** (Claude Code CLI knowledge anatomy, post-ADR-002):
 
-1. **Skills** (`claude-routines/skills/*.md`) — static rule playbook, read every cycle: `regime-detection.md`, `signal-evaluation.md`, `trading-discipline.md`, `known-traps.md`, `post-mortem-protocol.md`, `pattern-detector.md`, `backtest-diagnostics.md`.
-2. **Memory** (`claude-routines/memory/*.md`) — accumulated wisdom from THIS portfolio: `lessons-learned.md`, `strategy-performance.md`, `operator-preferences.md`, `recent-regime-history.md`. Grown by post-mortem cron weekly.
-3. **Journal** (Postgres `brain_journal` table, append-only) — every past decision with reasoning + outcome.
-4. **ML priors** (FreqAI XGBoost model) — learned patterns from 5–10y OHLCV; auto-retrains daily.
+1. **Skills** (`<bot>/claude-routines/skills/*.md`) — static rule playbook, read every cycle: `regime-detection.md`, `signal-evaluation.md`, `trading-discipline.md`, `known-traps.md`, `post-mortem-protocol.md`, `pattern-detector.md`, `backtest-diagnostics.md` (crypto). Polymarket adds `oracle-dispute-protocol.md`, `news-velocity-playbook.md`.
+2. **Memory** (`<bot>/claude-routines/memory/*.md`) — accumulated wisdom from THIS bot's portfolio: `lessons-learned.md`, `strategy-performance.md`, `operator-preferences.md`, `recent-regime-history.md`. Grown by post-mortem cron weekly. Per-bot.
+3. **Journal** (Postgres `<schema>.brain_journal` table, append-only — `brain.*` for crypto, `polymarket.*` for polymarket) — every past decision with reasoning + outcome. Iron Law 5 enforced via trigger raising SQLSTATE 42501 on UPDATE/DELETE.
+4. **ML priors** — crypto: FreqAI XGBoost from 5–10y OHLCV, auto-retrains daily. Polymarket: TBD calibration-tuned probabilistic forecaster (Phase 9+ of forthcoming polymarket plan).
+5. **References** (`references/`, RAG layer per ADR-002) — external grounded research distilled from NotebookLM. Compiled `refs-<bot>-decision.md` (≤8K tokens) injected into every cycle via `--append-system-prompt-file`. Operator-curated; Iron Law 4 read-only at runtime.
 
-**The body** (Freqtrade fork) handles execution, risk, and backtest. Claude **never** writes trading code autonomously — strategy logic changes require human design with Claude as analyst.
+**The body** is per-bot: `freqtrade-fork/` (crypto) handles CCXT order placement + risk + backtest; `polymarket-bot/clob-client/` (polymarket) wraps py-clob-client. Claude **never** writes trading code autonomously — strategy logic changes require human design with Claude as analyst.
 
 ---
 
@@ -59,13 +70,75 @@ The brain is observed via a **Bot Cockpit UI** (Next.js + TradingView Lightweigh
 
 | Path | Owner | Purpose |
 |---|---|---|
-| [`claude-routines/`](claude-routines/) | Brain | Skills, memory, routines (cron specs in `.md`) |
-| [`pulse-bridge/`](pulse-bridge/) | Bridge | FastAPI shim translating Claude decisions → Freqtrade hooks. Also serves dashboard read-only API. Single FastAPI app, two routers (`/v1/*` for brain, `/dashboard/*` for UI). |
-| [`freqtrade-fork/`](freqtrade-fork/) | Body | Git submodule pointing at github.com/freqtrade/freqtrade. Custom strategy lives at `freqtrade-fork/user_data/strategies/ClaudeOversightStrategy.py`. **Do not edit Freqtrade core**; only `user_data/`. |
-| [`dashboard-ui/`](dashboard-ui/) | UI | Next.js 15 App Router. TradingView Lightweight Charts v5. Tailscale-only access. |
-| [`infra/`](infra/) | Ops | `docker-compose.yml` (Postgres only), `migrations/*.sql`, `systemd/*.service`, `data_loader/*.py` (Binance Vision + CoinDesk), `scripts/*.py` (post-mortem cron, retrain health check, walk-forward, chaos test). |
-| [`tests/`](tests/) | All | Pytest. Real services in integration tests (mocks only here, not in production code). |
-| [`docs/`](docs/) | All | `plans/` (design + impl plan), `research/` (NotebookLM artifacts), `decisions/` (ADRs from `gaspol-adr`). |
+| [`crypto-bot/`](crypto-bot/) | Crypto bot | Per-bot brain artifacts (`claude-routines/skills/`, `memory/`, `routines/`) + Freqtrade strategy/config (`freqtrade-config/`). Reads/writes Postgres `brain.*` schema. Body submodule lives at `../freqtrade-fork/` (root, per ADR-001). |
+| [`polymarket-bot/`](polymarket-bot/) | Polymarket bot | Per-bot brain artifacts + py-clob-client wrapper (`clob-client/`) + strategies (`strategies/`). Reads/writes Postgres `polymarket.*` schema. Currently SKELETON ONLY (forthcoming separate plan). |
+| [`freqtrade-fork/`](freqtrade-fork/) | Crypto body | Git submodule pointing at github.com/freqtrade/freqtrade. Logically owned by `crypto-bot/` but kept at repo root per ADR-001 (rewrite-cost > benefit). **Do not edit Freqtrade core**; only `user_data/`. |
+| [`pulse-bridge/`](pulse-bridge/) | Bridge | Shared FastAPI shim. Routes: `/v1/crypto/*` and `/v1/polymarket/*` for brain↔body, `/dashboard/*` for UI. HMAC contract identical across bots. |
+| [`dashboard-ui/`](dashboard-ui/) | UI | Next.js 15 App Router. TradingView Lightweight Charts v5. Tailscale-only access. Top-nav bot switcher routes between crypto and polymarket views. |
+| [`infra/`](infra/) | Ops | `docker-compose.yml` (Postgres only), `migrations/*.sql` (brain + polymarket schemas), `systemd/*.service`, `data_loader/*.py` (Binance Vision + CoinDesk for crypto; polymarket source TBD), `scripts/*.py` (post-mortem cron, retrain, walk-forward, chaos test, `compile_refs.py` for the references layer). |
+| [`references/`](references/) | RAG layer | The fifth brain knowledge surface per ADR-002. Per-bot subfolders (`crypto/`, `polymarket/`) + `shared/` (walk-forward, Kelly, oversight pattern) + `global-trading-config.md` (Iron Laws + JSON contract + precedence). Compiled `refs-<bot>-decision.md` (≤8K tokens) injected per cron cycle. **Operator-curated only** (Iron Law 4 extension). |
+| [`tests/`](tests/) | All | Pytest. Real services in integration tests (mocks only here, not in production code). Markers: `@pytest.mark.integration` requires real Postgres + Telegram. |
+| [`docs/`](docs/) | All | `plans/` (16-phase crypto plan; multi-bot restructure plan), `research/` (NotebookLM artifacts), `decisions/` (ADRs from `gaspol-adr`, including ADR-001 mono-repo and ADR-002 references layer). |
+
+---
+
+## Multi-Bot Boundaries
+
+Per [ADR-001](docs/decisions/2026-05-07-001-mono-repo-multi-bot.md), this repo houses two bots side by side. Boundaries:
+
+**Shared (cross-bot, root-level):**
+
+- `pulse-bridge/` — single FastAPI app with multi-router (`/v1/crypto/*`, `/v1/polymarket/*`, `/dashboard/*`). Brain↔body HMAC contract identical across bots.
+- `dashboard-ui/` — single Next.js cockpit with top-nav switcher between bots. The 5 views (Live, Strategy Lab, Brain Journal, FreqAI Insights, Iteration History) clone per asset class.
+- `infra/` — one Postgres host, one Telegram bot, one VPS, one systemd unit family (`<bot>-freqtrade.service`, `<bot>-routine.timer`, etc.).
+- `references/global-trading-config.md` and `references/shared/` — cross-bot invariants (Iron Laws, JSON contract, walk-forward methodology, Kelly criterion, oversight pattern).
+- `freqtrade-fork/` submodule — at repo root despite being crypto-only, per ADR-001 (rewrite-cost > benefit).
+
+**Per-bot (under `crypto-bot/` or `polymarket-bot/`):**
+
+- `<bot>/claude-routines/{skills,memory,routines}/` — bot-specific decision rules and learned wisdom.
+- `<bot>/freqtrade-config/` (crypto only) or `<bot>/clob-client/`, `<bot>/strategies/` (polymarket).
+- `references/<bot>/` — bot-specific reference content (microstructure, regime taxonomy, failure modes).
+
+**Postgres schema isolation (schema-level, NOT database-level):**
+
+- `brain.*` — crypto bot. Legacy schema name kept per ADR-001 (renaming would force migration churn at zero functional benefit).
+- `polymarket.*` — polymarket bot. Canonical bot-named forward.
+- `public.*` — Freqtrade ORM (auto-creates `trades`, `pairlocks` at first run).
+- Future bots use their own bot-named schema (`<bot>.*`), NOT `brain.*`. Naming asymmetry is documented and tolerated; do NOT rename `brain` retroactively.
+
+**Risk budgeting across bots:**
+
+- Daily loss circuit breaker (-5%) and max drawdown kill switch (-20%) apply to **total equity ACROSS bots**, not per-bot.
+- Max concurrent positions cap is per-bot (3 each) AND additionally constrained by total-portfolio risk budget.
+- Phase 12 live-capital decision: split between bots only AFTER each has independently passed paper trade.
+
+---
+
+## References Layer
+
+Per [ADR-002](docs/decisions/2026-05-07-002-references-rag-layer.md), the brain has a fifth knowledge surface: external grounded research distilled from NotebookLM into `references/`.
+
+**Precedence order (when sources conflict at runtime):**
+
+1. **Iron Laws** — non-negotiable, architecturally enforced. Cannot be overridden by ANY other source.
+2. **Skills** (`<bot>/claude-routines/skills/*.md`) — operator-curated rules for THIS portfolio.
+3. **References** (`references/`) — external grounded knowledge. Override training data and memory. CANNOT override skills or Iron Laws.
+4. **Memory** (`<bot>/claude-routines/memory/*.md`).
+5. **Training data** — fallback only.
+
+If references contradict skills/Iron Laws at runtime, brain MUST: (a) abstain (default veto), (b) log conflict to `<schema>.brain_journal` with `decision='halt'`, (c) Telegram alert for operator review. Never silently resolve.
+
+**Inject mechanism:** every routine cron invocation appends the compiled per-bot decision file to the system prompt:
+
+```
+claude --append-system-prompt-file references/<bot>/compiled/refs-<bot>-decision.md \
+       --skill <routine-skill-name> ...
+```
+
+The compiled file (`infra/scripts/compile_refs.py`) is built by deliberate selection — Quick Decision Heuristics + first paragraph per topic from each source reference. Hard cap 8K tokens; script fails loud if exceeded. Token cost ~$30/bot/month at Sonnet 4.6 with 5-min prompt cache.
+
+**Update workflow:** NotebookLM research → `nlm notebook query` → operator hand-distills → commit source ref + recompiled decision file. Human-in-the-loop, NOT a cron job (Iron Law 4 extension — see below).
 
 ---
 
@@ -159,19 +232,23 @@ See "Anti-Placeholder Rules" above. This is not a style preference; it is a capi
 
 ### Iron Law 4: Claude must not modify its own discipline files
 
-`claude-routines/skills/trading-discipline.md` is **read-only by convention**. Claude has the file-write tool but must never auto-edit this file. Operator-only edits, with ADR.
+`<bot>/claude-routines/skills/trading-discipline.md` is **read-only by convention** (applies per-bot). Claude has the file-write tool but must never auto-edit this file. Operator-only edits, with ADR.
 
 The same applies to:
 
-- `freqtrade-fork/user_data/config.json` (risk rail values)
-- `infra/migrations/*.sql` (schema constraints)
+- `crypto-bot/freqtrade-config/config.json` (crypto risk rail values)
+- Polymarket position-sizing config (`polymarket-bot/clob-client/config.json` once written)
+- `infra/migrations/*.sql` (schema constraints, including `003_polymarket_schema.sql`)
+- `infra/postgres/init.sql` (schema bootstrap + grants)
+- `references/` and all subfolders (per ADR-002 extension — references are operator-curated; auto-edits would defeat citation discipline)
 - This file (`CLAUDE.md`)
+- All `docs/decisions/*.md` (ADRs are immutable once accepted; supersede via new ADR, not edit)
 
 If Claude detects an opportunity to "improve" any of these autonomously — STOP, raise to operator via Telegram, wait.
 
 ### Iron Law 5: Memory grows append-only
 
-The `brain_journal` Postgres table has `INSERT, SELECT` grants only — `UPDATE` and `DELETE` are explicitly REVOKED at migration time. The `claude-routines/memory/*.md` files are append-only by convention; Claude may add new entries but must not rewrite or delete past lessons. This makes the audit log tamper-evident.
+The `brain_journal` Postgres tables in BOTH `brain.*` and `polymarket.*` schemas have triggers that REJECT `UPDATE` and `DELETE` (raise SQLSTATE `42501` insufficient_privilege). Verified in `tests/integration/test_schemas_bootstrap.py` (crypto) and `tests/integration/test_polymarket_schema.py` (polymarket). The `<bot>/claude-routines/memory/*.md` files are append-only by convention; Claude may add new entries but must not rewrite or delete past lessons. This makes the audit log tamper-evident.
 
 ---
 
