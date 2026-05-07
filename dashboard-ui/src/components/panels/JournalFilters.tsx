@@ -10,6 +10,9 @@ import {
   JOURNAL_OUTCOMES,
   JOURNAL_REGIMES,
   type BrainJournalFilters,
+  type JournalDecision,
+  type JournalOutcome,
+  type JournalRegime,
 } from "@/lib/api-types";
 
 export interface JournalFiltersProps {
@@ -51,7 +54,10 @@ export function JournalFilters({ value, onChange }: JournalFiltersProps) {
           id="journal-filter-regime"
           value={value.regime ?? ""}
           onChange={(e) =>
-            setField("regime", e.target.value === "all" ? "" : e.target.value)
+            setField(
+              "regime",
+              e.target.value as Exclude<JournalRegime, "all"> | "",
+            )
           }
           className="h-9"
         >
@@ -71,7 +77,10 @@ export function JournalFilters({ value, onChange }: JournalFiltersProps) {
           id="journal-filter-decision"
           value={value.decision ?? ""}
           onChange={(e) =>
-            setField("decision", e.target.value === "all" ? "" : e.target.value)
+            setField(
+              "decision",
+              e.target.value as Exclude<JournalDecision, "all"> | "",
+            )
           }
           className="h-9"
         >
@@ -91,7 +100,10 @@ export function JournalFilters({ value, onChange }: JournalFiltersProps) {
           id="journal-filter-outcome"
           value={value.outcome ?? ""}
           onChange={(e) =>
-            setField("outcome", e.target.value === "all" ? "" : e.target.value)
+            setField(
+              "outcome",
+              e.target.value as Exclude<JournalOutcome, "all"> | "",
+            )
           }
           className="h-9"
         >

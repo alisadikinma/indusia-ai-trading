@@ -10,7 +10,9 @@
 import {
   QueryClient,
   QueryClientProvider,
+  useInfiniteQuery,
   useQuery,
+  type UseInfiniteQueryOptions,
   type UseQueryOptions,
 } from "@tanstack/react-query";
 import { useMemo, type ReactNode } from "react";
@@ -164,6 +166,71 @@ export function useBrainJournal(
     queryKey: ["brain-journal", filters, page, size],
     queryFn: () =>
       apiFetch<JournalPage>("/dashboard/journal", { searchParams }),
+    ...options,
+  });
+}
+
+/**
+ * Infinite-scroll variant of useBrainJournal.
+ *
+ * Journal grows ~3000 rows/day at 5-min cadence; a single 200-row fetch is
+ * useless for Phase 6+ post-mortem. This hook paginates by `page` (1-indexed)
+ * and returns `{ data: { pages: JournalPage[] }, fetchNextPage, hasNextPage,
+ * isFetchingNextPage }`. The consumer flattens `pages` into entries and drives
+ * `fetchNextPage()` from the virtualizer when the user scrolls near the end.
+ */
+type InfiniteHookOpts = Omit<
+  UseInfiniteQueryOptions<
+    JournalPage,
+    Error,
+    { pages: JournalPage[]; pageParams: number[] },
+    readonly unknown[],
+    number
+  >,
+  "queryKey" | "queryFn" | "getNextPageParam" | "initialPageParam"
+>;
+
+export function useBrainJournalInfinite(
+  args: { filters: BrainJournalFilters; size: number },
+  options?: InfiniteHookOpts,
+) {
+  const { filters, size } = args;
+
+  return useInfiniteQuery<
+    JournalPage,
+    Error,
+    { pages: JournalPage[]; pageParams: number[] },
+    readonly unknown[],
+    number
+  >({
+    queryKey: ["brain-journal-infinite", filters, size],
+    initialPageParam: 1,
+    queryFn: ({ pageParam }) => {
+      const searchParams: Record<string, string | number | undefined> = {
+        page: pageParam as number,
+        size,
+      };
+      if (filters.regime && filters.regime.length > 0)
+        searchParams.regime = filters.regime;
+      if (filters.decision && filters.decision.length > 0)
+        searchParams.decision = filters.decision;
+      if (filters.outcome && filters.outcome.length > 0)
+        searchParams.outcome = filters.outcome;
+      if (filters.from) searchParams.from = filters.from;
+      if (filters.to) searchParams.to = filters.to;
+      if (filters.q && filters.q.trim().length > 0)
+        searchParams.q = filters.q.trim();
+      return apiFetch<JournalPage>("/dashboard/journal", { searchParams });
+    },
+    getNextPageParam: (lastPage, allPages) => {
+      const loaded = allPages.reduce((acc, p) => acc + p.items.length, 0);
+      // No next page when:
+      //  - server returned an empty page (defensive — shouldn't happen mid-list)
+      //  - we've materialized everything the server reports as `total`
+      if (lastPage.items.length === 0) return undefined;
+      if (loaded >= lastPage.total) return undefined;
+      return lastPage.page + 1;
+    },
     ...options,
   });
 }

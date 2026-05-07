@@ -31,17 +31,6 @@ export interface JournalPage {
   size: number;
 }
 
-// Brain Journal filter contract — mirrors GET /dashboard/journal query params.
-// Comma-separated values for regime/decision/outcome map to SQL `IN (...)`.
-export interface BrainJournalFilters {
-  regime?: string;
-  decision?: string;
-  outcome?: string;
-  from?: string;
-  to?: string;
-  q?: string;
-}
-
 // brain.brain_journal.regime CHECK constraint — kept aligned with the schema.
 // 'all' is a UI-only sentinel meaning "do not filter".
 export const JOURNAL_REGIMES = [
@@ -74,6 +63,19 @@ export const JOURNAL_OUTCOMES = [
   "open",
 ] as const;
 export type JournalOutcome = (typeof JOURNAL_OUTCOMES)[number];
+
+// Brain Journal filter contract — mirrors GET /dashboard/journal query params.
+// Comma-separated values for regime/decision/outcome map to SQL `IN (...)`.
+// Each filter is either an enum literal (excluding the "all" UI sentinel) or
+// "" (no filter). The "all" option is a UI-only convenience that maps to "".
+export interface BrainJournalFilters {
+  regime?: Exclude<JournalRegime, "all"> | "";
+  decision?: Exclude<JournalDecision, "all"> | "";
+  outcome?: Exclude<JournalOutcome, "all"> | "";
+  from?: string;
+  to?: string;
+  q?: string;
+}
 
 export interface Position {
   signal_id: number;

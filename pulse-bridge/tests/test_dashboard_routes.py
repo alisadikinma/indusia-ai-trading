@@ -419,6 +419,39 @@ async def test_journal_export_csv_returns_text_csv(
 
 
 @pytest.mark.asyncio
+async def test_journal_export_csv_filename_is_timestamped(
+    app_client: AsyncClient,
+    auth_headers: dict[str, str],
+    db_pool: asyncpg.Pool,
+) -> None:
+    """The Content-Disposition filename must include a UTC timestamp so
+    multiple filtered exports per session don't collide on download."""
+    tag = f"phase15f-csvts-{_secrets_token()}"
+    await _seed_journal_row(
+        db_pool,
+        regime="trending_up",
+        decision="approve",
+        reasoning=f"{tag} ts row",
+        actual_outcome="win",
+    )
+    r = await app_client.get(
+        "/dashboard/journal/export.csv",
+        params={"q": tag},
+        headers=auth_headers,
+    )
+    assert r.status_code == 200
+    cd = r.headers.get("content-disposition", "")
+    # Must reference brain_journal_<UTC compact>.csv, e.g.
+    # filename="brain_journal_20260507T123456Z.csv"
+    import re
+
+    m = re.search(r'filename="brain_journal_(\d{8}T\d{6}Z)\.csv"', cd)
+    assert m is not None, f"unexpected Content-Disposition: {cd!r}"
+    # Sanity-check: timestamp parseable.
+    datetime.strptime(m.group(1), "%Y%m%dT%H%M%SZ")
+
+
+@pytest.mark.asyncio
 async def test_journal_export_csv_respects_filters(
     app_client: AsyncClient,
     auth_headers: dict[str, str],

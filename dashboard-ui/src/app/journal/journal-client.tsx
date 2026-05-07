@@ -3,7 +3,10 @@
 import * as React from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 
-import { brainJournalCsvUrl, useBrainJournal } from "@/lib/api-client";
+import {
+  brainJournalCsvUrl,
+  useBrainJournalInfinite,
+} from "@/lib/api-client";
 import type { BrainJournalFilters } from "@/lib/api-types";
 import { JournalEntry } from "@/components/panels/JournalEntry";
 import { JournalFilters } from "@/components/panels/JournalFilters";
@@ -16,6 +19,10 @@ import { Skeleton } from "@/components/ui/skeleton";
 const PAGE_SIZE = 200;
 const ROW_ESTIMATE = 56; // collapsed row height ~56px; virtualizer corrects on measure
 const SEARCH_DEBOUNCE_MS = 300;
+// When the last visible row is within this many rows of the end of the
+// loaded list, prefetch the next page. Tuned to keep scrolling smooth at
+// virtualizer overscan=8.
+const FETCH_AHEAD = 10;
 
 /**
  * Brain Journal browser — Phase 1.5.F surface.
@@ -43,14 +50,27 @@ export function JournalClient() {
     return () => window.clearTimeout(t);
   }, [filters]);
 
-  const { data, isLoading, error, isFetching } = useBrainJournal({
+  const {
+    data,
+    isLoading,
+    error,
+    isFetching,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  } = useBrainJournalInfinite({
     filters: debouncedFilters,
-    page: 1,
     size: PAGE_SIZE,
   });
 
-  const items = data?.items ?? [];
-  const total = data?.total ?? 0;
+  // Flatten the page envelopes into one entries array. The virtualizer below
+  // only renders the visible window, so this stays cheap even at 10k+ rows.
+  const items = React.useMemo(
+    () => (data?.pages ?? []).flatMap((p) => p.items),
+    [data],
+  );
+  // `total` reflects the full filtered set on the server — same on every page.
+  const total = data?.pages?.[0]?.total ?? 0;
 
   const [expandedId, setExpandedId] = React.useState<number | null>(null);
 
@@ -69,6 +89,30 @@ export function JournalClient() {
   React.useEffect(() => {
     rowVirtualizer.measure();
   }, [expandedId, rowVirtualizer]);
+
+  // Drive fetchNextPage from the virtualizer: when the last virtual item is
+  // within FETCH_AHEAD rows of the loaded length, request the next page.
+  const virtualItems = rowVirtualizer.getVirtualItems();
+  const lastVisibleIndex =
+    virtualItems.length > 0
+      ? virtualItems[virtualItems.length - 1].index
+      : -1;
+  React.useEffect(() => {
+    if (lastVisibleIndex < 0) return;
+    if (
+      lastVisibleIndex >= items.length - FETCH_AHEAD &&
+      hasNextPage &&
+      !isFetchingNextPage
+    ) {
+      fetchNextPage();
+    }
+  }, [
+    lastVisibleIndex,
+    items.length,
+    hasNextPage,
+    isFetchingNextPage,
+    fetchNextPage,
+  ]);
 
   const [exportError, setExportError] = React.useState<string | null>(null);
 
@@ -230,9 +274,23 @@ export function JournalClient() {
               </div>
             </div>
 
-            {isFetching && !isFirstLoad ? (
+            {isFetchingNextPage ? (
+              <div
+                className="border-t border-border px-4 py-2 text-xs text-muted-foreground"
+                data-testid="journal-loading-more"
+              >
+                Loading older entries…
+              </div>
+            ) : isFetching && !isFirstLoad ? (
               <div className="border-t border-border px-4 py-2 text-xs text-muted-foreground">
                 Refreshing…
+              </div>
+            ) : !hasNextPage && items.length > 0 ? (
+              <div
+                className="border-t border-border px-4 py-2 text-xs text-muted-foreground"
+                data-testid="journal-end-of-list"
+              >
+                End of journal — {items.length} of {total} entries loaded.
               </div>
             ) : null}
           </CardContent>

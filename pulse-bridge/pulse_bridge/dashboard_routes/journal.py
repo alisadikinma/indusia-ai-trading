@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import csv
 import io
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Query, Request
@@ -75,9 +75,6 @@ def _build_where(
     """
     where: list[str] = []
     params: list[Any] = []
-
-    def _next() -> str:
-        return f"${len(params) + 1}"
 
     regimes = _split_multi(regime)
     if regimes:
@@ -269,10 +266,14 @@ async def export_journal_csv(
         )
 
     payload = buf.getvalue().encode("utf-8")
+    # Timestamp in filename so multiple filtered exports per session don't
+    # collide on download (operator habit during post-mortem deep-dives).
+    ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    content_disposition = f'attachment; filename="brain_journal_{ts}.csv"'
     return StreamingResponse(
         iter([payload]),
         media_type="text/csv; charset=utf-8",
         headers={
-            "Content-Disposition": 'attachment; filename="brain_journal.csv"',
+            "Content-Disposition": content_disposition,
         },
     )
