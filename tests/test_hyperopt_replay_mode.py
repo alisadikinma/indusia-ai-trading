@@ -173,3 +173,92 @@ def test_replay_params_rejects_missing_replay_run_id(tmp_path: Path) -> None:
         f"expected non-zero exit when --replay-run-id omitted, got 0\n"
         f"STDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
     )
+
+
+def test_replay_params_rejects_out_of_range_value(tmp_path: Path) -> None:
+    """An entry with a parameter outside its declared search-space range
+    must be rejected with SystemExit BEFORE any DB row is written.
+
+    Why this matters: rows in ``brain.hyperopt_results`` are the canonical
+    OOS-replay source for ADR-003 §5. A silently-accepted out-of-range
+    value would corrupt that audit trail.
+    """
+    # buy_ema_fast=5 is below the strategy-declared low=10 floor.
+    bad_set = [{
+        "buy_ema_fast": 5,
+        "buy_ema_slow": 50,
+        "buy_adx_threshold": 25,
+        "buy_pred_threshold": 0.65,
+        "sell_atr_mult": 2.0,
+    }]
+    params_json = tmp_path / "bad_range.json"
+    params_json.write_text(json.dumps(bad_set), encoding="utf-8")
+
+    cmd = [
+        sys.executable,
+        str(RUNNER),
+        "--pair", "BTC/USDT",
+        "--timerange-start", "2024-01-01",
+        "--timerange-end", "2024-01-08",
+        "--replay-params", str(params_json),
+        "--replay-run-id", "test-bad-range-should-not-persist",
+    ]
+    result = subprocess.run(
+        cmd, cwd=str(REPO_ROOT), capture_output=True, text=True, timeout=60,
+    )
+    assert result.returncode != 0, (
+        f"expected non-zero exit for out-of-range value, got 0\n"
+        f"STDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
+    )
+    combined = (result.stdout or "") + (result.stderr or "")
+    assert "buy_ema_fast" in combined, (
+        f"error message must name the offending param. Got:\n{combined}"
+    )
+    assert "out of range" in combined or "range" in combined, (
+        f"error message must mention range. Got:\n{combined}"
+    )
+
+
+def test_replay_params_rejects_fast_not_less_than_slow(tmp_path: Path) -> None:
+    """An entry where ``buy_ema_fast >= buy_ema_slow`` violates the
+    strategy's structural constraint (the EMA crossover requires fast<slow)
+    and must be rejected with SystemExit BEFORE any DB row is written.
+
+    The strategy's IntParameter ranges (fast 10-25, slow 40-80) don't
+    overlap, so it's syntactically impossible for fast >= slow when both
+    independently pass range checks. We exercise the layered defence by
+    setting fast=40 (in slow's range, out of fast's range) and slow=40 — at
+    minimum the loader must fail loudly. This pins the contract that "both
+    range AND constraint violations crash before persistence".
+    """
+    bad_set = [{
+        "buy_ema_fast": 40,
+        "buy_ema_slow": 40,
+        "buy_adx_threshold": 25,
+        "buy_pred_threshold": 0.65,
+        "sell_atr_mult": 2.0,
+    }]
+    params_json = tmp_path / "bad_constraint.json"
+    params_json.write_text(json.dumps(bad_set), encoding="utf-8")
+
+    cmd = [
+        sys.executable,
+        str(RUNNER),
+        "--pair", "BTC/USDT",
+        "--timerange-start", "2024-01-01",
+        "--timerange-end", "2024-01-08",
+        "--replay-params", str(params_json),
+        "--replay-run-id", "test-bad-constraint-should-not-persist",
+    ]
+    result = subprocess.run(
+        cmd, cwd=str(REPO_ROOT), capture_output=True, text=True, timeout=60,
+    )
+    assert result.returncode != 0, (
+        f"expected non-zero exit for fast>=slow violation, got 0\n"
+        f"STDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
+    )
+    combined = (result.stdout or "") + (result.stderr or "")
+    assert "buy_ema_fast" in combined or "buy_ema_slow" in combined, (
+        f"error message must name at least one of the offending EMA params. "
+        f"Got:\n{combined}"
+    )

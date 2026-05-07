@@ -188,7 +188,6 @@ def _backtest(df: pd.DataFrame, params: ParamSet, starting_balance: float) -> pd
     stop_price = 0.0
 
     closes = df["close"].to_numpy()
-    highs = df["high"].to_numpy()
     lows = df["low"].to_numpy()
     atrs = df["atr14"].to_numpy()
     dates = df["date"].to_numpy()
@@ -337,6 +336,17 @@ def _load_replay_param_sets(path: Path) -> list[ParamSet]:
         "buy_pred_threshold",
         "sell_atr_mult",
     }
+    # Range bounds mirror the IntParameter / DecimalParameter declarations on
+    # ClaudeOversightStrategy (low, high, both inclusive). Keep these in sync
+    # with the strategy file — drifting these silently would corrupt the
+    # OOS-replay rows that ADR-003 §5 cites as canonical.
+    ranges: dict[str, tuple[float, float]] = {
+        "buy_ema_fast": (10, 25),
+        "buy_ema_slow": (40, 80),
+        "buy_adx_threshold": (20, 35),
+        "buy_pred_threshold": (0.55, 0.75),
+        "sell_atr_mult": (1.5, 3.0),
+    }
     out: list[ParamSet] = []
     for i, entry in enumerate(raw):
         if not isinstance(entry, dict):
@@ -348,15 +358,32 @@ def _load_replay_param_sets(path: Path) -> list[ParamSet]:
             raise SystemExit(
                 f"--replay-params entry #{i+1} missing keys: {sorted(missing)}"
             )
-        out.append(
-            ParamSet(
-                buy_ema_fast=int(entry["buy_ema_fast"]),
-                buy_ema_slow=int(entry["buy_ema_slow"]),
-                buy_adx_threshold=int(entry["buy_adx_threshold"]),
-                buy_pred_threshold=float(entry["buy_pred_threshold"]),
-                sell_atr_mult=float(entry["sell_atr_mult"]),
-            )
+        ps = ParamSet(
+            buy_ema_fast=int(entry["buy_ema_fast"]),
+            buy_ema_slow=int(entry["buy_ema_slow"]),
+            buy_adx_threshold=int(entry["buy_adx_threshold"]),
+            buy_pred_threshold=float(entry["buy_pred_threshold"]),
+            sell_atr_mult=float(entry["sell_atr_mult"]),
         )
+        # Per-parameter range checks (crash loud — Iron Law 3 / no silent
+        # corruption of canonical ADR-003 §5 audit rows).
+        coerced = asdict(ps)
+        for name, (low, high) in ranges.items():
+            val = coerced[name]
+            if val < low or val > high:
+                raise SystemExit(
+                    f"--replay-params entry #{i+1}: {name} = {val} out of range "
+                    f"[{low}, {high}]"
+                )
+        # Structural constraint: the strategy's EMA crossover requires
+        # fast<slow. Enforced in random-search via _sample_params; mirror it
+        # here so replay rows can never violate it either.
+        if ps.buy_ema_fast >= ps.buy_ema_slow:
+            raise SystemExit(
+                f"--replay-params entry #{i+1}: buy_ema_fast = {ps.buy_ema_fast} "
+                f"must be strictly less than buy_ema_slow = {ps.buy_ema_slow}"
+            )
+        out.append(ps)
     return out
 
 
@@ -536,7 +563,8 @@ def main() -> int:
     print("[3/3] Top-3 by loss (lower is better)")
     best.sort(key=lambda x: x[0])
     for rank, (loss, params, metrics) in enumerate(best[:3], 1):
-        print(f"  #{rank} loss={loss:+.4f} sharpe={-loss:+.2f}")
+        sharpe_display = f"{-loss:+.2f}" if metrics["total_trades"] > 0 else "None"
+        print(f"  #{rank} loss={loss:+.4f} sharpe={sharpe_display}")
         print(f"      params: {asdict(params)}")
         print(f"      metrics: {metrics}")
 

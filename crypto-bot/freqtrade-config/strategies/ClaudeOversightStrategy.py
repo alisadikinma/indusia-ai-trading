@@ -1,10 +1,16 @@
 """ClaudeOversightStrategy — Phase 3 v1 trend-following strategy.
 
 Rule set:
-    Entry  : EMA20 > EMA50  AND  ADX(14) > 25  AND  close > EMA20  AND  volume > 0
-    Exit   : EMA20 < EMA50  AND  volume > 0
-    Stop   : 2 * ATR(14) trailing (custom_stoploss)
+    Entry  : ema_fast > ema_slow  AND  ADX(14) > adx_th  AND  close > ema_fast  AND  volume > 0
+    Exit   : ema_fast < ema_slow  AND  volume > 0
+    Stop   : sell_atr_mult * ATR(14) trailing (custom_stoploss)
     ROI    : time-decaying ladder
+
+Phase 8 wrapping note: ``ema_fast`` / ``ema_slow`` columns hold whatever
+periods the hyperopt-chosen ``buy_ema_fast`` / ``buy_ema_slow`` resolve to
+(ranges 10-25 / 40-80 respectively). The columns are NOT pinned at 20/50;
+log readers / dashboard overlays should treat the column NAME as a label,
+not a literal period.
 
 Phase 3 scope: rule-based signal generation + write each generated entry signal
 to brain.signals (Postgres) so the dashboard WS sees it in real time. The
@@ -132,8 +138,8 @@ class ClaudeOversightStrategy(IStrategy):
         # (or the loaded best from params file when running plain backtest).
         ema_fast_period = int(self.buy_ema_fast.value)
         ema_slow_period = int(self.buy_ema_slow.value)
-        dataframe["ema20"] = ta.EMA(dataframe, timeperiod=ema_fast_period)
-        dataframe["ema50"] = ta.EMA(dataframe, timeperiod=ema_slow_period)
+        dataframe["ema_fast"] = ta.EMA(dataframe, timeperiod=ema_fast_period)
+        dataframe["ema_slow"] = ta.EMA(dataframe, timeperiod=ema_slow_period)
         dataframe["adx14"] = ta.ADX(dataframe, timeperiod=14)
         dataframe["atr14"] = ta.ATR(dataframe, timeperiod=14)
         return dataframe
@@ -219,9 +225,9 @@ class ClaudeOversightStrategy(IStrategy):
         adx_th = int(self.buy_adx_threshold.value)
         pred_th = float(self.buy_pred_threshold.value)
         cond = (
-            (dataframe["ema20"] > dataframe["ema50"])
+            (dataframe["ema_fast"] > dataframe["ema_slow"])
             & (dataframe["adx14"] > adx_th)
-            & (dataframe["close"] > dataframe["ema20"])
+            & (dataframe["close"] > dataframe["ema_fast"])
             & (dataframe["volume"] > 0)
             & (freqai_gate > pred_th)
         )
@@ -237,7 +243,7 @@ class ClaudeOversightStrategy(IStrategy):
 
     # ----- exit signal -----------------------------------------------------
     def populate_exit_trend(self, dataframe: pd.DataFrame, metadata: dict) -> pd.DataFrame:
-        cond = (dataframe["ema20"] < dataframe["ema50"]) & (dataframe["volume"] > 0)
+        cond = (dataframe["ema_fast"] < dataframe["ema_slow"]) & (dataframe["volume"] > 0)
         dataframe.loc[cond, "exit_long"] = 1
         dataframe.loc[cond, "exit_tag"] = "trend_reversal"
         return dataframe

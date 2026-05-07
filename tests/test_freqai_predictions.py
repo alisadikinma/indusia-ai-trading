@@ -142,8 +142,8 @@ def test_strategy_entry_gated_on_prediction_above_0_65() -> None:
             "close": close,
             "volume": 1000.0,
             # All rule conditions satisfied:
-            "ema20": close - 0.5,  # > ema50
-            "ema50": close - 1.0,
+            "ema_fast": close - 0.5,  # > ema_slow
+            "ema_slow": close - 1.0,
             "adx14": 30.0,  # > 25
             # FreqAI gate: predictions below threshold → must veto.
             "&-prediction": 0.30,
@@ -177,8 +177,8 @@ def test_strategy_entry_unchanged_when_freqai_column_absent() -> None:
             "low": close - 0.2,
             "close": close,
             "volume": 1000.0,
-            "ema20": close - 0.5,
-            "ema50": close - 1.0,
+            "ema_fast": close - 0.5,
+            "ema_slow": close - 1.0,
             "adx14": 30.0,
             # No &-prediction column.
         }
