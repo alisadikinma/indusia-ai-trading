@@ -286,6 +286,117 @@ Sign Co-Authored-By line at end of every Claude-assisted commit message.
 
 ---
 
+## Model Routing
+
+Auto-switch Claude model based on task effort. Three tiers, concrete criteria — no "use judgement".
+
+### Tier matrix
+
+| Tier | Model ID | Best for | Cost ratio (vs Haiku) |
+|---|---|---|---|
+| **HEAVY** | `claude-opus-4-7` | Architectural reasoning, cross-domain debugging, capital-at-stake decisions | ~18× |
+| **STANDARD** | `claude-sonnet-4-6` | Default phase work, code review, post-mortem analysis | ~4× |
+| **LIGHT** | `claude-haiku-4-5-20251001` | Lookups, single-file edits, cron summaries, structured outputs | 1× |
+
+### Decision rules — pick exactly one tier per task
+
+Use **HEAVY (Opus 4.7)** when ANY of:
+- Cross-file refactoring touching ≥3 files OR ≥300 LoC
+- Architectural decision requiring an ADR
+- Phase 9.5 iteration loop diagnosis (failed backtest postmortem)
+- Capital-at-stake live trade decision (Phase 12+ emergency vetoes)
+- Strategy v2+ redesign or feature engineering for new ML inputs
+- Debugging a heisenbug that survived dry-run + backtest
+- Cross-bot reasoning (crypto + polymarket interaction)
+
+Use **STANDARD (Sonnet 4.6)** when (default tier):
+- Single-phase implementation per gaspol-execute (one phase = one Sonnet subagent)
+- Code review of a single phase's diff (`code-reviewer` agent)
+- Weekly post-mortem cron (Phase 6 — deep regime analysis on losing trades)
+- Standard 5-min oversight routine (reads context, judges regime, decides)
+- Test writing (TDD step 1 → fail → step 3 implement)
+- Schema migration authoring
+- Skill or routine markdown authoring
+- Plan-verifier audit
+
+Use **LIGHT (Haiku 4.5)** when ALL of:
+- Single file edit ≤50 LoC OR pure lookup
+- No cross-domain reasoning needed
+- Output is structured (JSON, table row, lint check, summary line)
+- Latency or token cost dominates value
+
+Specifically: daily retrain health check, log line summarization, commit-message generation from diff, gap-detector report formatting, shadcn primitive scaffolding from a known pattern, file-existence assertions in tests.
+
+### Routine-specific routing
+
+Per-cycle model is declared in the routine spec's frontmatter:
+
+| Routine | Cadence | Model |
+|---|---|---|
+| `crypto-bot/claude-routines/routines/oversight-loop.md` | every 5 min | **STANDARD** |
+| `crypto-bot/claude-routines/routines/weekly-postmortem.md` | Sunday 00:00 UTC | **STANDARD** |
+| `infra/scripts/retrain_health_check.py` (Claude analysis on amber/red) | daily 06:00 UTC | **LIGHT** |
+| Phase 9.5 iteration diagnosis (`backtest-diagnostics.md` skill invocation) | conditional on Phase 9 fail | **HEAVY** |
+| Capital-at-stake live emergency review (Phase 12+) | on circuit-breaker trigger | **HEAVY** |
+
+### How to invoke each tier
+
+**Interactive Claude Code session** — operator switches mid-session:
+```
+/model opus     # → HEAVY
+/model sonnet   # → STANDARD (default)
+/model haiku    # → LIGHT
+```
+
+**Non-interactive cron / subprocess** — explicit `--model`:
+```bash
+# HEAVY
+claude --model claude-opus-4-7 -p "<prompt>"
+# STANDARD (default if --model omitted, but be explicit)
+claude --model claude-sonnet-4-6 -p "<prompt>"
+# LIGHT
+claude --model claude-haiku-4-5-20251001 -p "<prompt>"
+```
+
+**Sub-agent dispatch via Agent tool** — declare in `model` parameter:
+```
+Agent({
+  description: "...",
+  subagent_type: "general-purpose",
+  model: "opus",     // or "sonnet" or "haiku"
+  prompt: "..."
+})
+```
+
+If `model` is omitted, the parent agent's tier is inherited.
+
+**gaspol-execute phase dispatch** — when dispatching implementer subagents:
+- Default: Sonnet (per gaspol-parallel skill convention)
+- Heavy phases (Phase 9.5 iteration, Phase 13 architectural rethink): explicitly request Opus
+- Light phases (UI sub-blocks 1.5.H polish, 1.5.I auth hardening): consider Haiku if scope is mechanical
+
+### Cost guardrail
+
+Estimated monthly token spend at current architecture (24/7 ops):
+- Oversight loop (Sonnet, 288 cycles/day × 4K tokens) ≈ $20/month
+- Weekly postmortem (Sonnet, 4 runs × 30K tokens) ≈ $1/month
+- Retrain health check (Haiku, 30 runs × 2K tokens) ≈ $0.10/month
+- Phase 9.5 iteration (Opus, conditional, ~5 runs × 60K tokens) ≈ $5/iteration
+
+Total expected: **~$25–35/month per bot** at full operation. Operator's Claude Code Max plan covers most interactive work.
+
+If a single tier's budget exceeds 2× the projection, alert via Telegram (Phase 6 retrain-health pattern; expand the cron in Phase 8+ to include token telemetry).
+
+### When in doubt
+
+Default to **STANDARD (Sonnet)**. Then:
+- If tests fail or output drifts → escalate to HEAVY (Opus) and re-run
+- If output is repetitive/formulaic and Sonnet is overkill → drop to LIGHT (Haiku) on the next attempt
+
+Never default to HEAVY for routine work — token cost compounds quickly at 24/7 cadence.
+
+---
+
 ## Workflow
 
 | Step | Skill |
