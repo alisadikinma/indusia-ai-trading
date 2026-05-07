@@ -17,6 +17,7 @@ unit suite still runs cleanly on a developer box without Postgres.
 from __future__ import annotations
 
 import os
+import uuid
 from datetime import UTC, datetime
 
 import numpy as np
@@ -206,3 +207,140 @@ def test_signal_writeback_inserts_into_brain_signals() -> None:
         # Cleanup so reruns stay deterministic.
         cur.execute("DELETE FROM brain.signals WHERE pair = %s", (test_pair,))
         conn.commit()
+
+
+# ---------------------------------------------------------------------------
+# Phase 4 — confirm_trade_entry honors Claude's veto / approve verdict
+# ---------------------------------------------------------------------------
+def _pg_conn_str() -> str:
+    return (
+        f"host={os.environ['POSTGRES_HOST']} port={os.environ['POSTGRES_PORT']} "
+        f"dbname={os.environ['POSTGRES_DB']} user={os.environ['POSTGRES_USER']} "
+        f"password={os.environ['POSTGRES_PASSWORD']}"
+    )
+
+
+def _set_claude_decision(pair: str, decision: str | None) -> None:
+    """Direct UPDATE on brain.signals.claude_decision for the latest row of
+    the given pair. Used in tests only; bypasses the /v1/decide path because
+    we're testing the strategy in isolation from the bridge.
+    """
+    import psycopg
+
+    with psycopg.connect(_pg_conn_str()) as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE brain.signals SET claude_decision = %s, claude_decided_at = now() "
+            "WHERE id = (SELECT id FROM brain.signals WHERE pair = %s ORDER BY ts DESC LIMIT 1)",
+            (decision, pair),
+        )
+        conn.commit()
+
+
+def _cleanup_test_signal_if_safe(pair: str) -> None:
+    """Best-effort cleanup of a test pair's signals row.
+
+    Note: brain.signals → brain.brain_journal has ON DELETE SET NULL, which
+    triggers an UPDATE on the (append-only) journal table. We therefore only
+    DELETE signals that have no journal row pointing at them — otherwise the
+    Iron Law 5 trigger would correctly reject the cascade. Test pairs are
+    suffixed with PID + uuid for cross-run uniqueness, so leftover rows do
+    not interfere with reruns.
+    """
+    import psycopg
+
+    with psycopg.connect(_pg_conn_str()) as conn, conn.cursor() as cur:
+        cur.execute(
+            "DELETE FROM brain.signals s WHERE s.pair = %s "
+            "AND NOT EXISTS (SELECT 1 FROM brain.brain_journal j WHERE j.signal_id = s.id)",
+            (pair,),
+        )
+        conn.commit()
+
+
+@pytest.mark.integration
+def test_confirm_trade_entry_aborts_on_veto() -> None:
+    """If brain.signals.claude_decision='veto' for the just-written signal,
+    confirm_trade_entry must return False on the next call for that signal."""
+    from strategies.ClaudeOversightStrategy import ClaudeOversightStrategy
+
+    strat = ClaudeOversightStrategy({"runmode": "dry_run"})
+    test_pair = f"VETO{os.getpid()}{uuid.uuid4().hex[:6]}/USDT"
+    test_ts = datetime.now(tz=UTC)
+    try:
+        # Step 1 — first call writes the signal (claude_decision = NULL).
+        first = strat.confirm_trade_entry(
+            pair=test_pair,
+            order_type="limit",
+            amount=0.01,
+            rate=100.0,
+            time_in_force="GTC",
+            current_time=test_ts,
+            entry_tag="trend_ema_cross_adx",
+            side="long",
+        )
+        assert first is True, "with NULL decision, first call must proceed"
+
+        # Step 2 — operator-equivalent: mark the signal vetoed.
+        _set_claude_decision(test_pair, "veto")
+
+        # Step 3 — re-call confirm_trade_entry on the same (pair, ts, side):
+        # the ON CONFLICT path returns the same signal id, then the read sees
+        # 'veto' and the call must abort.
+        second = strat.confirm_trade_entry(
+            pair=test_pair,
+            order_type="limit",
+            amount=0.01,
+            rate=100.0,
+            time_in_force="GTC",
+            current_time=test_ts,
+            entry_tag="trend_ema_cross_adx",
+            side="long",
+        )
+        assert second is False, "veto must block the trade entry"
+    finally:
+        _cleanup_test_signal_if_safe(test_pair)
+
+
+@pytest.mark.integration
+def test_confirm_trade_entry_proceeds_on_approve() -> None:
+    """An 'approve' decision must let confirm_trade_entry return True."""
+    from strategies.ClaudeOversightStrategy import ClaudeOversightStrategy
+
+    strat = ClaudeOversightStrategy({"runmode": "dry_run"})
+    test_pair = f"APPR{os.getpid()}{uuid.uuid4().hex[:6]}/USDT"
+    test_ts = datetime.now(tz=UTC)
+    try:
+        first = strat.confirm_trade_entry(
+            pair=test_pair, order_type="limit", amount=0.01, rate=200.0,
+            time_in_force="GTC", current_time=test_ts,
+            entry_tag="trend_ema_cross_adx", side="long",
+        )
+        assert first is True
+        _set_claude_decision(test_pair, "approve")
+        second = strat.confirm_trade_entry(
+            pair=test_pair, order_type="limit", amount=0.01, rate=200.0,
+            time_in_force="GTC", current_time=test_ts,
+            entry_tag="trend_ema_cross_adx", side="long",
+        )
+        assert second is True
+    finally:
+        _cleanup_test_signal_if_safe(test_pair)
+
+
+@pytest.mark.integration
+def test_confirm_trade_entry_proceeds_when_no_decision_yet() -> None:
+    """NULL claude_decision (default) means rule-based default → proceed."""
+    from strategies.ClaudeOversightStrategy import ClaudeOversightStrategy
+
+    strat = ClaudeOversightStrategy({"runmode": "dry_run"})
+    test_pair = f"NULL{os.getpid()}{uuid.uuid4().hex[:6]}/USDT"
+    test_ts = datetime.now(tz=UTC)
+    try:
+        accepted = strat.confirm_trade_entry(
+            pair=test_pair, order_type="limit", amount=0.01, rate=300.0,
+            time_in_force="GTC", current_time=test_ts,
+            entry_tag="trend_ema_cross_adx", side="long",
+        )
+        assert accepted is True
+    finally:
+        _cleanup_test_signal_if_safe(test_pair)

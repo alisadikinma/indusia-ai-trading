@@ -67,6 +67,40 @@ def test_old_root_paths_no_longer_exist() -> None:
     )
 
 
+# ---------------------------------------------------------------------------
+# Polymarket-bot scaffold (Phase D)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize(
+    "relative_dir",
+    [
+        "polymarket-bot",
+        "polymarket-bot/claude-routines",
+        "polymarket-bot/clob-client",
+        "polymarket-bot/strategies",
+    ],
+)
+def test_polymarket_bot_skeleton_dirs(relative_dir: str) -> None:
+    target = REPO_ROOT / relative_dir
+    assert target.is_dir(), f"polymarket-bot scaffold incomplete: {relative_dir}/ not found"
+
+
+def test_polymarket_bot_readme_exists_with_phase_plan_marker() -> None:
+    """polymarket-bot/README.md must explicitly mark itself SKELETON ONLY
+    and reference the planned phased implementation (separate plan)."""
+    readme = REPO_ROOT / "polymarket-bot" / "README.md"
+    assert readme.is_file(), f"polymarket-bot/README.md missing"
+    body = readme.read_text(encoding="utf-8")
+    assert len(body) >= 1200, (
+        f"polymarket-bot/README.md too thin ({len(body)} chars, need >=1200)"
+    )
+    # Hard markers preventing the skeleton from being mistaken for a finished bot:
+    assert "SKELETON ONLY" in body, "polymarket-bot/README.md must contain 'SKELETON ONLY' marker"
+    assert "Brier" in body or "calibration" in body, (
+        "README must mention Polymarket-specific gates (Brier score / calibration ECE)"
+    )
+
+
 def test_freqtrade_submodule_is_populated() -> None:
     """freqtrade-fork/ must be a populated git submodule, not an empty dir."""
     freqtrade_dir = REPO_ROOT / "freqtrade-fork"
