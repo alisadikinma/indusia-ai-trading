@@ -7,11 +7,18 @@ dashboard_main + positions.py route are implemented.
 from __future__ import annotations
 
 import json
+import secrets
 from datetime import datetime, timedelta, timezone
 
 import asyncpg
 import pytest
 from httpx import AsyncClient
+
+
+def _secrets_token() -> str:
+    """Short URL-safe token for test row tagging — keeps Phase 1.5.F journal
+    tests from cross-contaminating since brain.brain_journal is append-only."""
+    return secrets.token_hex(4)
 
 
 # ---------------------------------------------------------------------------
@@ -172,6 +179,276 @@ async def test_journal_pagination_params(
     assert r.status_code == 200
     assert r.json()["page"] == 2
     assert r.json()["size"] == 25
+
+
+# ---------------------------------------------------------------------------
+# /dashboard/journal — Phase 1.5.F filter / search / export extensions.
+#
+# brain.brain_journal is append-only (Iron Law 5), so we cannot TRUNCATE in
+# clean_db. Instead, every test row uses a UUID-prefixed reasoning string we
+# can target with the FTS `q` parameter to isolate it from other test rows.
+# ---------------------------------------------------------------------------
+async def _seed_journal_row(
+    pool: asyncpg.Pool,
+    *,
+    regime: str,
+    decision: str,
+    reasoning: str,
+    actual_outcome: str | None,
+    confidence: int = 7,
+) -> int:
+    async with pool.acquire() as conn:
+        return await conn.fetchval(
+            """
+            INSERT INTO brain.brain_journal
+                (regime, decision, reasoning, confidence, actual_outcome,
+                 expected_outcome)
+            VALUES ($1, $2, $3, $4, $5, $6)
+            RETURNING id
+            """,
+            regime,
+            decision,
+            reasoning,
+            confidence,
+            actual_outcome,
+            "test expected",
+        )
+
+
+@pytest.mark.asyncio
+async def test_journal_outcome_filter_win_only(
+    app_client: AsyncClient,
+    auth_headers: dict[str, str],
+    db_pool: asyncpg.Pool,
+) -> None:
+    """outcome=win returns only entries with actual_outcome='win'."""
+    tag = f"phase15f-outcome-{_secrets_token()}"
+    await _seed_journal_row(
+        db_pool,
+        regime="trending_up",
+        decision="approve",
+        reasoning=f"{tag} winning trade",
+        actual_outcome="win",
+    )
+    await _seed_journal_row(
+        db_pool,
+        regime="ranging",
+        decision="veto",
+        reasoning=f"{tag} losing trade",
+        actual_outcome="loss",
+    )
+    await _seed_journal_row(
+        db_pool,
+        regime="volatile",
+        decision="approve",
+        reasoning=f"{tag} still open",
+        actual_outcome=None,
+    )
+
+    r = await app_client.get(
+        "/dashboard/journal",
+        params={"q": tag, "outcome": "win", "size": 50},
+        headers=auth_headers,
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["total"] == 1
+    assert body["items"][0]["actual_outcome"] == "win"
+
+
+@pytest.mark.asyncio
+async def test_journal_outcome_filter_open(
+    app_client: AsyncClient,
+    auth_headers: dict[str, str],
+    db_pool: asyncpg.Pool,
+) -> None:
+    """outcome=open returns only entries with actual_outcome IS NULL."""
+    tag = f"phase15f-open-{_secrets_token()}"
+    await _seed_journal_row(
+        db_pool,
+        regime="trending_up",
+        decision="approve",
+        reasoning=f"{tag} closed win",
+        actual_outcome="win",
+    )
+    await _seed_journal_row(
+        db_pool,
+        regime="ranging",
+        decision="approve",
+        reasoning=f"{tag} still open trade",
+        actual_outcome=None,
+    )
+
+    r = await app_client.get(
+        "/dashboard/journal",
+        params={"q": tag, "outcome": "open", "size": 50},
+        headers=auth_headers,
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["total"] == 1
+    assert body["items"][0]["actual_outcome"] is None
+
+
+@pytest.mark.asyncio
+async def test_journal_regime_multi_value_filter(
+    app_client: AsyncClient,
+    auth_headers: dict[str, str],
+    db_pool: asyncpg.Pool,
+) -> None:
+    """regime supports comma-separated values: 'trending_up,ranging' returns either."""
+    tag = f"phase15f-multi-{_secrets_token()}"
+    await _seed_journal_row(
+        db_pool,
+        regime="trending_up",
+        decision="approve",
+        reasoning=f"{tag} up",
+        actual_outcome="win",
+    )
+    await _seed_journal_row(
+        db_pool,
+        regime="ranging",
+        decision="approve",
+        reasoning=f"{tag} range",
+        actual_outcome="loss",
+    )
+    await _seed_journal_row(
+        db_pool,
+        regime="volatile",
+        decision="veto",
+        reasoning=f"{tag} vol",
+        actual_outcome=None,
+    )
+
+    r = await app_client.get(
+        "/dashboard/journal",
+        params={"q": tag, "regime": "trending_up,ranging", "size": 50},
+        headers=auth_headers,
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["total"] == 2
+    regimes = {item["regime"] for item in body["items"]}
+    assert regimes == {"trending_up", "ranging"}
+
+
+@pytest.mark.asyncio
+async def test_journal_search_matches_reasoning_fts(
+    app_client: AsyncClient,
+    auth_headers: dict[str, str],
+    db_pool: asyncpg.Pool,
+) -> None:
+    tag = f"phase15f-fts-{_secrets_token()}"
+    await _seed_journal_row(
+        db_pool,
+        regime="trending_up",
+        decision="approve",
+        reasoning=f"{tag} reclaimed 50d moving average on rising volume",
+        actual_outcome="win",
+    )
+    # An entry that should NOT match the search.
+    await _seed_journal_row(
+        db_pool,
+        regime="trending_up",
+        decision="approve",
+        reasoning=f"{tag} unrelated pattern",
+        actual_outcome="loss",
+    )
+
+    r = await app_client.get(
+        "/dashboard/journal",
+        params={"q": f"{tag} reclaimed", "size": 50},
+        headers=auth_headers,
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["total"] == 1
+    assert "reclaimed" in body["items"][0]["reasoning"]
+
+
+@pytest.mark.asyncio
+async def test_journal_export_csv_returns_text_csv(
+    app_client: AsyncClient,
+    auth_headers: dict[str, str],
+    db_pool: asyncpg.Pool,
+) -> None:
+    tag = f"phase15f-csv-{_secrets_token()}"
+    await _seed_journal_row(
+        db_pool,
+        regime="trending_up",
+        decision="approve",
+        reasoning=f"{tag} clean reasoning",
+        actual_outcome="win",
+    )
+    # Reasoning with embedded comma + newline + double-quote — must be CSV-escaped.
+    await _seed_journal_row(
+        db_pool,
+        regime="ranging",
+        decision="veto",
+        reasoning=f'{tag} multi,line\nquoted "text" inside',
+        actual_outcome="loss",
+    )
+
+    r = await app_client.get(
+        "/dashboard/journal/export.csv",
+        params={"q": tag},
+        headers=auth_headers,
+    )
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("text/csv")
+    body = r.text
+    # CSV header row.
+    first_line = body.splitlines()[0]
+    for col in (
+        "id",
+        "ts",
+        "regime",
+        "decision",
+        "confidence",
+        "reasoning",
+        "expected_outcome",
+        "actual_outcome",
+    ):
+        assert col in first_line
+    # Both rows present.
+    assert "clean reasoning" in body
+    # Embedded comma / quote / newline correctly escaped (RFC 4180 quoting).
+    assert '"' in body  # at minimum, fields containing commas are quoted
+    # Doubled internal quotes per RFC 4180.
+    assert '""text""' in body
+
+
+@pytest.mark.asyncio
+async def test_journal_export_csv_respects_filters(
+    app_client: AsyncClient,
+    auth_headers: dict[str, str],
+    db_pool: asyncpg.Pool,
+) -> None:
+    tag = f"phase15f-csvf-{_secrets_token()}"
+    await _seed_journal_row(
+        db_pool,
+        regime="trending_up",
+        decision="approve",
+        reasoning=f"{tag} approved row",
+        actual_outcome="win",
+    )
+    await _seed_journal_row(
+        db_pool,
+        regime="trending_up",
+        decision="veto",
+        reasoning=f"{tag} vetoed row",
+        actual_outcome=None,
+    )
+
+    r = await app_client.get(
+        "/dashboard/journal/export.csv",
+        params={"q": tag, "decision": "veto"},
+        headers=auth_headers,
+    )
+    assert r.status_code == 200
+    body = r.text
+    assert "vetoed row" in body
+    assert "approved row" not in body
 
 
 # ---------------------------------------------------------------------------

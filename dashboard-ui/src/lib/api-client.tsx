@@ -18,6 +18,7 @@ import { useMemo, type ReactNode } from "react";
 import type {
   BacktestRunDetail,
   BacktestRunMeta,
+  BrainJournalFilters,
   EquityPoint,
   FreqaiCalibration,
   IterationRun,
@@ -136,6 +137,51 @@ export function useJournal(
     queryFn: () => apiFetch<JournalPage>("/dashboard/journal", { searchParams: params }),
     ...options,
   });
+}
+
+// Phase 1.5.F — Brain Journal browser hook. Supersedes useJournal for the
+// dedicated /journal view (which adds the `outcome` filter + CSV export).
+// Existing callers of useJournal (LiveChart, ReasoningSidebar) keep working.
+export function useBrainJournal(
+  args: { filters: BrainJournalFilters; page: number; size: number },
+  options?: HookOpts<JournalPage>,
+) {
+  const { filters, page, size } = args;
+  const searchParams: Record<string, string | number | undefined> = {
+    page,
+    size,
+  };
+  if (filters.regime && filters.regime.length > 0) searchParams.regime = filters.regime;
+  if (filters.decision && filters.decision.length > 0)
+    searchParams.decision = filters.decision;
+  if (filters.outcome && filters.outcome.length > 0)
+    searchParams.outcome = filters.outcome;
+  if (filters.from) searchParams.from = filters.from;
+  if (filters.to) searchParams.to = filters.to;
+  if (filters.q && filters.q.trim().length > 0) searchParams.q = filters.q.trim();
+
+  return useQuery<JournalPage, Error, JournalPage, readonly unknown[]>({
+    queryKey: ["brain-journal", filters, page, size],
+    queryFn: () =>
+      apiFetch<JournalPage>("/dashboard/journal", { searchParams }),
+    ...options,
+  });
+}
+
+/** Build the CSV export URL with the same filter contract as useBrainJournal. */
+export function brainJournalCsvUrl(filters: BrainJournalFilters): string {
+  const url = new URL("/dashboard/journal/export.csv", DASHBOARD_API_URL);
+  if (filters.regime && filters.regime.length > 0)
+    url.searchParams.set("regime", filters.regime);
+  if (filters.decision && filters.decision.length > 0)
+    url.searchParams.set("decision", filters.decision);
+  if (filters.outcome && filters.outcome.length > 0)
+    url.searchParams.set("outcome", filters.outcome);
+  if (filters.from) url.searchParams.set("from", filters.from);
+  if (filters.to) url.searchParams.set("to", filters.to);
+  if (filters.q && filters.q.trim().length > 0)
+    url.searchParams.set("q", filters.q.trim());
+  return url.toString();
 }
 
 export function usePositions(options?: HookOpts<Position[]>) {
