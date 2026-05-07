@@ -31,16 +31,17 @@ test.describe("Bot Cockpit /login", () => {
     await expect(page).toHaveURL(/\/login(\?.*)?$/);
   });
 
-  test("valid credentials redirect to /dashboard stub", async ({ page }) => {
+  test("valid credentials redirect to /dashboard", async ({ page }) => {
     await page.goto("/login");
     await page.getByLabel("Username").fill(fixture.username);
     await page.getByLabel("Password").fill(fixture.password);
     await page.getByRole("button", { name: /sign in/i }).click();
     await page.waitForURL("**/dashboard");
+    // Phase 1.5.D landed: real Live Dashboard, not the stub. Confirm at least
+    // one of the panel headings is visible.
     await expect(
-      page.getByRole("heading", { name: /^Live Dashboard$/ }),
+      page.getByRole("heading", { name: /^Live Chart$/ }),
     ).toBeVisible();
-    await expect(page.getByText(/coming in 1\.5\.D/i)).toBeVisible();
   });
 
   test("middleware redirects unauthenticated /dashboard to /login", async ({

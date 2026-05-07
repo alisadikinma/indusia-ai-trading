@@ -43,6 +43,11 @@ export default defineConfig({
       DASHBOARD_OPERATOR_USERNAME: fixture.username,
       DASHBOARD_OPERATOR_PASSWORD_ARGON2_HASH: fixture.argon2Hash,
       DASHBOARD_JWT_SECRET: TEST_JWT_SECRET,
+      // Public env vars are inlined at build time. Required by api-client.tsx /
+      // ws-client.ts (Iron Law 3 — no silent fallback). Tests stub backend
+      // responses via page.route(), so the URL needn't be reachable.
+      NEXT_PUBLIC_DASHBOARD_API_URL: "http://127.0.0.1:8081",
+      NEXT_PUBLIC_DASHBOARD_WS_URL: "ws://127.0.0.1:8081/dashboard/ws",
     },
   },
 });
