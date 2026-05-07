@@ -51,12 +51,16 @@ function gateSharpe(m: BacktestMetrics): GateResult {
 }
 
 function gateMaxDd(m: BacktestMetrics): GateResult {
+  // max_dd is stored as a NEGATIVE magnitude in Postgres (matches Freqtrade
+  // hyperopt + Phase 9 walk-forward convention). The Iron Law 2 gate is
+  // "drawdown not deeper than 25%" → v > -0.25. PHASE_9_GATES.max_dd_max
+  // remains a positive magnitude (0.25) for human-readable footer copy.
   const v = asNumber(m.max_dd);
   return {
-    pass: v != null && v < PHASE_9_GATES.max_dd_max,
+    pass: v != null && v > -PHASE_9_GATES.max_dd_max,
     observed: v,
     threshold: PHASE_9_GATES.max_dd_max,
-    comparator: "<",
+    comparator: ">",
     fmt: (x) => fmtPct(x, 2),
   };
 }

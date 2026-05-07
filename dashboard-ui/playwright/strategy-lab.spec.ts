@@ -97,7 +97,7 @@ test.describe("Bot Cockpit /strategy-lab", () => {
       test_end: "2025-09-30T00:00:00Z",
       metrics: {
         sharpe: 1.8,
-        max_dd: 0.18,
+        max_dd: -0.18,
         profit_factor: 1.6,
         total_trades: 142,
         win_rate: 0.58,

@@ -45,7 +45,6 @@ function buildCandidates(
     {
       parameters: Record<string, unknown>;
       sharpes: number[];
-      representativeRunId: number;
       runs: BacktestRunMeta[];
     }
   >();
@@ -60,28 +59,34 @@ function buildCandidates(
     if (existing) {
       existing.sharpes.push(sharpe);
       existing.runs.push(r);
-      if (r.fold_index < existing.runs[0].fold_index) {
-        existing.representativeRunId = r.id;
-      }
     } else {
       groups.set(hash, {
         parameters: detail.parameters,
         sharpes: [sharpe],
-        representativeRunId: r.id,
         runs: [r],
       });
     }
   }
 
+  // Compute representative AFTER all runs are grouped — pick the run with the
+  // minimum fold_index in this set. Avoids the arrival-order bug where
+  // comparing against runs[0] (the first inserted, not the current min) lets
+  // a later mid-fold run wrongly overwrite an earlier-fold representative.
   return Array.from(groups.entries())
-    .map(([hash, g]) => ({
-      hash,
-      parameters: g.parameters,
-      meanSharpe:
-        g.sharpes.reduce((a, b) => a + b, 0) / g.sharpes.length,
-      representativeRunId: g.representativeRunId,
-      foldCount: g.runs.length,
-    }))
+    .map(([hash, g]) => {
+      const minRun = g.runs.reduce(
+        (min, r) => (r.fold_index < min.fold_index ? r : min),
+        g.runs[0],
+      );
+      return {
+        hash,
+        parameters: g.parameters,
+        meanSharpe:
+          g.sharpes.reduce((a, b) => a + b, 0) / g.sharpes.length,
+        representativeRunId: minRun.id,
+        foldCount: g.runs.length,
+      };
+    })
     .sort((a, b) => b.meanSharpe - a.meanSharpe);
 }
 
@@ -185,11 +190,19 @@ export function ParameterSetSelector({
     [],
   );
 
-  // Reset cached details when the runs collection changes identity.
+  // Stable key for the current runs collection — drives the cache-reset
+  // effect below and is exposed as `data-runids` for e2e debugging.
   const runIdsKey = React.useMemo(
     () => runs.map((r) => r.id).join(","),
     [runs],
   );
+
+  // Reset cached run details when the runs collection identity changes,
+  // so a stale detail from a previous strategy version can never leak
+  // into the candidate set for a different run set.
+  React.useEffect(() => {
+    setDetails(new Map());
+  }, [runIdsKey]);
 
   const candidates = React.useMemo(
     () => buildCandidates(runs, details),
