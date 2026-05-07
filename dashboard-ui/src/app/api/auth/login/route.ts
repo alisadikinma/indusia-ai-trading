@@ -5,8 +5,10 @@ import {
   getOperatorPasswordHash,
   getOperatorUsername,
   signSession,
+  recordSession,
 } from "@/lib/auth";
 import { verifyPassword } from "@/lib/password";
+import { randomUUID } from "crypto";
 
 // argon2 is a native Node binding — must run on the Node.js runtime, not Edge.
 export const runtime = "nodejs";
@@ -58,7 +60,19 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const token = await signSession(expectedUsername);
+  // Generate JTI and record the session in the database before signing.
+  const jti = randomUUID();
+  try {
+    await recordSession(jti, expectedUsername);
+  } catch (error) {
+    console.error("Failed to record session in database:", error);
+    return NextResponse.json(
+      { error: "Server error." },
+      { status: 500 },
+    );
+  }
+
+  const token = await signSession(expectedUsername, jti);
   const res = NextResponse.json({ ok: true, redirect: nextPath });
   res.cookies.set({
     name: SESSION_COOKIE_NAME,

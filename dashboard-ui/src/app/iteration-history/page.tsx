@@ -1,16 +1,14 @@
 import { Header } from "@/components/layout/header";
 import { IterationHistoryClient } from "./iteration-history-client";
-import { getOperatorUsername } from "@/lib/auth";
+import { requireOperatorSession } from "@/lib/auth";
 
 export const metadata = { title: "Iteration History — Bot Cockpit" };
-// getOperatorUsername reads an env var, which is enough to opt the page out of
-// static rendering. No session-cookie read here — IterationHistoryClient does
-// not subscribe to a WebSocket (the iteration_runs table is written by Phase
-// 6/9.5 cron, not the live brain).
+// Reading the session cookie means this page is dynamic; opt out of static rendering.
 export const dynamic = "force-dynamic";
 
-export default function IterationHistoryPage() {
-  const operator = getOperatorUsername();
+export default async function IterationHistoryPage() {
+  // Defense-in-depth: require valid session + refresh on each page load.
+  const { operator } = await requireOperatorSession();
   const envTag = process.env.DASHBOARD_ENV_TAG ?? "dev";
 
   return (

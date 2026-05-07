@@ -1,5 +1,10 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { SESSION_COOKIE_NAME, verifySession } from "@/lib/auth";
+import {
+  SESSION_COOKIE_NAME,
+  SESSION_TTL_SECONDS,
+  refreshSession,
+  verifySession,
+} from "@/lib/auth";
 
 const PROTECTED_PREFIXES = [
   "/dashboard",
@@ -23,6 +28,7 @@ export async function proxy(req: NextRequest) {
     url.searchParams.set("next", pathname);
     return NextResponse.redirect(url);
   }
+  // Middleware defense-in-depth: verify session (includes DB revocation check).
   const session = await verifySession(token);
   if (!session) {
     const url = req.nextUrl.clone();
@@ -32,7 +38,26 @@ export async function proxy(req: NextRequest) {
     res.cookies.delete(SESSION_COOKIE_NAME);
     return res;
   }
-  return NextResponse.next();
+
+  // Sliding-window refresh: extend expires_at in DB and rotate cookie. Cookie
+  // mutation lives here (Node middleware) because Server Components can't
+  // write cookies in Next.js 15+ (ReadonlyRequestCookiesError). On refresh
+  // failure, leave the existing cookie in place — the JWT is still valid
+  // until its natural expiry.
+  const res = NextResponse.next();
+  const newToken = await refreshSession(session);
+  if (newToken) {
+    res.cookies.set({
+      name: SESSION_COOKIE_NAME,
+      value: newToken,
+      httpOnly: true,
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
+      path: "/",
+      maxAge: SESSION_TTL_SECONDS,
+    });
+  }
+  return res;
 }
 
 export const config = {

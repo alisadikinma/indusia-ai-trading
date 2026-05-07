@@ -1,8 +1,6 @@
-import { cookies } from "next/headers";
-
 import { Header } from "@/components/layout/header";
 import { StrategyLabClient } from "./strategy-lab-client";
-import { SESSION_COOKIE_NAME, getOperatorUsername } from "@/lib/auth";
+import { requireOperatorSession } from "@/lib/auth";
 
 export const metadata = { title: "Strategy Lab — Bot Cockpit" };
 // Reading the session cookie + env-required JWT secret means this page is
@@ -10,12 +8,8 @@ export const metadata = { title: "Strategy Lab — Bot Cockpit" };
 export const dynamic = "force-dynamic";
 
 export default async function StrategyLabPage() {
-  // Touch the cookie so this page is server-rendered with the same session
-  // semantics as /dashboard. The actual data flows client-side via TanStack
-  // Query against /dashboard/backtest/runs.
-  const cookieStore = await cookies();
-  cookieStore.get(SESSION_COOKIE_NAME);
-  const operator = getOperatorUsername();
+  // Defense-in-depth: require valid session + refresh on each page load.
+  const { operator } = await requireOperatorSession();
   const envTag = process.env.DASHBOARD_ENV_TAG ?? "dev";
 
   return (

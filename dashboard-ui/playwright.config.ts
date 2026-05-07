@@ -43,6 +43,8 @@ export default defineConfig({
       DASHBOARD_OPERATOR_USERNAME: fixture.username,
       DASHBOARD_OPERATOR_PASSWORD_ARGON2_HASH: fixture.argon2Hash,
       DASHBOARD_JWT_SECRET: TEST_JWT_SECRET,
+      // Database URL for session JTI tracking (Phase 1.5.I defense-in-depth).
+      DATABASE_URL: "postgres://trader:trader@127.0.0.1:5544/trading",
       // Public env vars are inlined at build time. Required by api-client.tsx /
       // ws-client.ts (Iron Law 3 — no silent fallback). Tests stub backend
       // responses via page.route(), so the URL needn't be reachable.
