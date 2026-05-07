@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { ErrorBoundary } from "@/components/error-boundary";
 
 import { useBacktestRun, useBacktestRuns } from "@/lib/api-client";
 import type { BacktestRunMeta } from "@/lib/api-types";
@@ -80,111 +81,133 @@ export function StrategyLabClient() {
   const isEmpty = !isLoadingRuns && (runs?.length ?? 0) === 0;
 
   return (
-    <main className="mx-auto w-full max-w-[1600px] flex-1 px-4 py-4">
-      <header className="mb-4 flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">
-            Strategy Lab
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            Walk-forward backtest viewer + hyperopt parameter comparison
-            (Phase 9 / Phase 8 surface).
-          </p>
-        </div>
-        {!isEmpty && !isLoadingRuns ? (
-          <div className="flex items-center gap-3">
-            <Label htmlFor="strategy-version-select" className="text-xs uppercase tracking-wide text-muted-foreground">
-              Strategy version
-            </Label>
-            <Select
-              id="strategy-version-select"
-              value={effectiveVersion ?? ""}
-              onChange={(e) => {
-                setVersionOverride(e.target.value);
-                // Reset fold override so the first fold of the new version
-                // is auto-selected next render.
-                setRunIdOverride(null);
-              }}
-              className="h-8 w-48"
-            >
-              {strategyVersions.map((v) => (
-                <option key={v} value={v}>
-                  {v}
-                </option>
-              ))}
-            </Select>
-            <Badge variant="outline">{runs?.length ?? 0} runs</Badge>
+    <ErrorBoundary viewName="Strategy Lab">
+      <main className="mx-auto w-full max-w-[1600px] flex-1 px-4 py-4">
+        {/* Header: stacks on sm, row on md+ */}
+        <header className="mb-4 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end sm:justify-between">
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight">
+              Strategy Lab
+            </h1>
+            <p className="text-sm text-muted-foreground">
+              Walk-forward backtest viewer + hyperopt parameter comparison
+              (Phase 9 / Phase 8 surface).
+            </p>
           </div>
-        ) : null}
-      </header>
+          {!isEmpty && !isLoadingRuns ? (
+            <div className="flex flex-wrap items-center gap-3">
+              <Label htmlFor="strategy-version-select" className="text-xs uppercase tracking-wide text-muted-foreground">
+                Strategy version
+              </Label>
+              <Select
+                id="strategy-version-select"
+                value={effectiveVersion ?? ""}
+                onChange={(e) => {
+                  setVersionOverride(e.target.value);
+                  // Reset fold override so the first fold of the new version
+                  // is auto-selected next render.
+                  setRunIdOverride(null);
+                }}
+                className="h-8 w-48"
+              >
+                {strategyVersions.map((v) => (
+                  <option key={v} value={v}>
+                    {v}
+                  </option>
+                ))}
+              </Select>
+              <Badge variant="outline">{runs?.length ?? 0} runs</Badge>
+            </div>
+          ) : null}
+        </header>
 
-      {runsError ? (
-        <Alert variant="destructive">
-          <AlertDescription>
-            Failed to load backtest runs: {runsError.message}
-          </AlertDescription>
-        </Alert>
-      ) : isLoadingRuns ? (
-        <Card>
-          <CardContent className="p-4">
-            <Skeleton className="h-8 w-64" />
-            <Skeleton className="mt-4 h-64 w-full" />
-          </CardContent>
-        </Card>
-      ) : isEmpty ? (
-        <Card>
-          <CardContent className="p-6">
-            <Alert variant="muted">
-              <AlertDescription>
-                No backtests yet. The brain.backtest_runs table populates
-                after Phase 9 walk-forward orchestrator (or Phase 8 hyperopt
-                sweeps) runs. See{" "}
-                <a
-                  className="underline"
-                  href="/docs/plans/2026-05-06-ai-trading-247.md"
-                >
-                  the plan
-                </a>{" "}
-                for the gate criteria.
-              </AlertDescription>
-            </Alert>
-          </CardContent>
-        </Card>
-      ) : (
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
-          {/* Left column — chart + fold tabs + metrics */}
-          <div className="flex flex-col gap-4 lg:col-span-8">
-            <Card>
-              <CardContent className="space-y-3 p-4">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <span className="text-sm font-medium">Walk-forward</span>
-                  <FoldNavigator
-                    runs={versionRuns}
-                    selectedRunId={effectiveRunId}
-                    onSelect={setRunIdOverride}
-                  />
-                </div>
-                <BacktestChart
-                  detail={detail ?? null}
-                  isLoading={detailLoading && !detail}
-                />
-              </CardContent>
-            </Card>
-            <Card>
+        {runsError ? (
+          <Alert variant="destructive">
+            <AlertDescription>
+              Failed to load backtest runs: {runsError.message}
+            </AlertDescription>
+          </Alert>
+        ) : isLoadingRuns ? (
+          /* Skeleton matches final layout: chart area + metrics table row */
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
+            <div className="flex flex-col gap-4 lg:col-span-8">
+              <Card>
+                <CardContent className="p-4">
+                  <Skeleton className="mb-3 h-6 w-40" />
+                  <Skeleton className="h-[400px] w-full" />
+                </CardContent>
+              </Card>
+              <Card>
+                <CardContent className="p-4">
+                  <Skeleton className="h-6 w-32" />
+                  <Skeleton className="mt-3 h-24 w-full" />
+                </CardContent>
+              </Card>
+            </div>
+            <Card className="lg:col-span-4">
               <CardContent className="p-4">
-                <MetricsTable runs={versionRuns} />
+                <Skeleton className="h-6 w-32" />
+                <Skeleton className="mt-3 h-48 w-full" />
               </CardContent>
             </Card>
           </div>
-
-          {/* Right column — parameter set comparison */}
-          <Card className="lg:col-span-4">
-            <CardContent className="p-4">
-              <ParameterSetSelector runs={versionRuns} />
+        ) : isEmpty ? (
+          <Card>
+            <CardContent className="p-6">
+              <Alert variant="muted">
+                <AlertDescription>
+                  No backtests yet. The brain.backtest_runs table populates
+                  after Phase 9 walk-forward orchestrator (or Phase 8 hyperopt
+                  sweeps) runs. See{" "}
+                  <a
+                    className="underline"
+                    href="/docs/plans/2026-05-06-ai-trading-247.md"
+                    rel="noopener noreferrer"
+                  >
+                    the plan
+                  </a>{" "}
+                  for the gate criteria.
+                </AlertDescription>
+              </Alert>
             </CardContent>
           </Card>
-        </div>
-      )}
-    </main>
+        ) : (
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
+            {/* Left column — chart + fold tabs + metrics */}
+            <div className="flex flex-col gap-4 lg:col-span-8">
+              <Card>
+                <CardContent className="space-y-3 p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <span className="text-sm font-medium">Walk-forward</span>
+                    <FoldNavigator
+                      runs={versionRuns}
+                      selectedRunId={effectiveRunId}
+                      onSelect={setRunIdOverride}
+                    />
+                  </div>
+                  <BacktestChart
+                    detail={detail ?? null}
+                    isLoading={detailLoading && !detail}
+                  />
+                </CardContent>
+              </Card>
+              <Card>
+                {/* Horizontal scroll wrapper for the metrics table on sm */}
+                <CardContent className="overflow-x-auto p-4">
+                  <MetricsTable runs={versionRuns} />
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* Right column — parameter set comparison */}
+            <Card className="lg:col-span-4">
+              <CardContent className="p-4">
+                <ParameterSetSelector runs={versionRuns} />
+              </CardContent>
+            </Card>
+          </div>
+        )}
+      </main>
+    </ErrorBoundary>
   );
 }

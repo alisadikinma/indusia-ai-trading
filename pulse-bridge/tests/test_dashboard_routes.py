@@ -990,3 +990,32 @@ async def test_iteration_runs_requires_auth(app_client: AsyncClient) -> None:
     """Unauthenticated request must return 401."""
     r = await app_client.get("/dashboard/iteration-runs")
     assert r.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# /dashboard/chart/pairs
+# ---------------------------------------------------------------------------
+@pytest.mark.asyncio
+async def test_chart_pairs_requires_auth(app_client: AsyncClient) -> None:
+    """Unauthenticated request to /chart/pairs must return 401."""
+    r = await app_client.get("/dashboard/chart/pairs")
+    assert r.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_chart_pairs_returns_whitelist(
+    app_client: AsyncClient, auth_headers: dict[str, str]
+) -> None:
+    """Happy path: returns non-empty list where every entry is a string.
+
+    The actual values come from crypto-bot/freqtrade-config/config.json —
+    BTC/USDT and ETH/USDT are the configured pair_whitelist in this repo.
+    """
+    r = await app_client.get("/dashboard/chart/pairs", headers=auth_headers)
+    assert r.status_code == 200
+    body = r.json()
+    assert isinstance(body, list)
+    assert len(body) > 0
+    for entry in body:
+        assert isinstance(entry, str)
+        assert "/" in entry  # minimal sanity: pairs are "BASE/QUOTE" format

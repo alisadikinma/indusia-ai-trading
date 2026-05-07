@@ -121,6 +121,7 @@ export function useOhlcv(
     queryKey: ["ohlcv", params],
     queryFn: () =>
       apiFetch<OhlcvPoint[]>("/dashboard/chart/ohlcv", { searchParams: params }),
+    staleTime: 1_000,
     ...options,
   });
 }
@@ -140,6 +141,7 @@ export function useJournal(
   return useQuery<JournalPage, Error, JournalPage, readonly unknown[]>({
     queryKey: ["journal", params],
     queryFn: () => apiFetch<JournalPage>("/dashboard/journal", { searchParams: params }),
+    staleTime: 30_000,
     ...options,
   });
 }
@@ -169,6 +171,7 @@ export function useBrainJournal(
     queryKey: ["brain-journal", filters, page, size],
     queryFn: () =>
       apiFetch<JournalPage>("/dashboard/journal", { searchParams }),
+    staleTime: 30_000,
     ...options,
   });
 }
@@ -234,6 +237,7 @@ export function useBrainJournalInfinite(
       if (loaded >= lastPage.total) return undefined;
       return lastPage.page + 1;
     },
+    staleTime: 30_000,
     ...options,
   });
 }
@@ -258,6 +262,7 @@ export function usePositions(options?: HookOpts<Position[]>) {
   return useQuery<Position[], Error, Position[], readonly unknown[]>({
     queryKey: ["positions"],
     queryFn: () => apiFetch<Position[]>("/dashboard/positions"),
+    staleTime: 5_000,
     ...options,
   });
 }
@@ -269,6 +274,7 @@ export function useEquity(
   return useQuery<EquityPoint[], Error, EquityPoint[], readonly unknown[]>({
     queryKey: ["equity", params],
     queryFn: () => apiFetch<EquityPoint[]>("/dashboard/equity", { searchParams: params }),
+    staleTime: 10_000,
     ...options,
   });
 }
@@ -277,6 +283,7 @@ export function useBacktestRuns(options?: HookOpts<BacktestRunMeta[]>) {
   return useQuery<BacktestRunMeta[], Error, BacktestRunMeta[], readonly unknown[]>({
     queryKey: ["backtest-runs"],
     queryFn: () => apiFetch<BacktestRunMeta[]>("/dashboard/backtest/runs"),
+    staleTime: 60_000,
     ...options,
   });
 }
@@ -286,6 +293,7 @@ export function useBacktestRun(id: number | null, options?: HookOpts<BacktestRun
     queryKey: ["backtest-run", id],
     queryFn: () => apiFetch<BacktestRunDetail>(`/dashboard/backtest/runs/${id}`),
     enabled: id != null,
+    staleTime: 60_000,
     ...options,
   });
 }
@@ -294,6 +302,7 @@ export function useFreqai(options?: HookOpts<FreqaiCalibration>) {
   return useQuery<FreqaiCalibration, Error, FreqaiCalibration, readonly unknown[]>({
     queryKey: ["freqai-calibration"],
     queryFn: () => apiFetch<FreqaiCalibration>("/dashboard/freqai/calibration"),
+    staleTime: 60_000, // WS notify invalidates explicitly on retrain
     ...options,
   });
 }
@@ -302,6 +311,7 @@ export function useFreqaiHistory(options?: HookOpts<FreqaiHistoryRow[]>) {
   return useQuery<FreqaiHistoryRow[], Error, FreqaiHistoryRow[], readonly unknown[]>({
     queryKey: ["freqai-history"],
     queryFn: () => apiFetch<FreqaiHistoryRow[]>("/dashboard/freqai/history"),
+    staleTime: 60_000, // WS notify invalidates explicitly on retrain
     ...options,
   });
 }
@@ -317,6 +327,7 @@ export function useFreqaiPredictions(
       apiFetch<FreqaiPredictionHistogram>("/dashboard/freqai/predictions", {
         searchParams: { hours },
       }),
+    staleTime: 60_000, // WS notify invalidates explicitly on retrain
     ...options,
   });
 }
@@ -325,6 +336,7 @@ export function useRisk(options?: HookOpts<RiskState>) {
   return useQuery<RiskState, Error, RiskState, readonly unknown[]>({
     queryKey: ["risk-state"],
     queryFn: () => apiFetch<RiskState>("/dashboard/risk/state"),
+    staleTime: 5_000,
     ...options,
   });
 }
@@ -343,6 +355,16 @@ export function useIterations(
     queryKey: ["iterations", filters],
     queryFn: () =>
       apiFetch<IterationRun[]>("/dashboard/iteration-runs", { searchParams: sp }),
+    staleTime: 30_000,
+    ...options,
+  });
+}
+
+export function usePairs(options?: HookOpts<string[]>) {
+  return useQuery<string[], Error, string[], readonly unknown[]>({
+    queryKey: ["chart-pairs"],
+    queryFn: () => apiFetch<string[]>("/dashboard/chart/pairs"),
+    staleTime: 60_000,
     ...options,
   });
 }

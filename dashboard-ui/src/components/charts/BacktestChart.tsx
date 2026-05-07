@@ -16,7 +16,7 @@ import {
   type UTCTimestamp,
 } from "lightweight-charts";
 
-import { useOhlcv } from "@/lib/api-client";
+import { useOhlcv, usePairs } from "@/lib/api-client";
 import type {
   BacktestRunDetail,
   BacktestTrade,
@@ -125,6 +125,17 @@ function buildEquityLine(
   return out;
 }
 
+// Phase 9 walk-forward folds can emit hundreds of thousands of equity-curve
+// points. Lightweight-charts chokes above ~50k points, and the human eye can't
+// distinguish beyond ~5k anyway. Decimate to at most TARGET_CHART_POINTS by
+// striding through the source array.
+const TARGET_CHART_POINTS = 5000;
+function decimate<T>(rows: readonly T[]): T[] {
+  if (rows.length <= TARGET_CHART_POINTS) return rows.slice();
+  const stride = Math.ceil(rows.length / TARGET_CHART_POINTS);
+  return rows.filter((_, i) => i % stride === 0);
+}
+
 /**
  * Regime bands for train/test windows. Walk-forward folds always have a
  * train window followed by a test window — the band lets the operator see
@@ -186,11 +197,6 @@ function applyRegimeBands(
   return regimeMarkers;
 }
 
-const PAIRS: ReadonlyArray<{ value: string; label: string }> = [
-  { value: "BTC/USDT", label: "BTC/USDT" },
-  { value: "ETH/USDT", label: "ETH/USDT" },
-];
-
 const TIMEFRAMES: ReadonlyArray<string> = ["15m", "1h", "4h", "1d"];
 
 const DEFAULT_PAIR = "BTC/USDT";
@@ -212,6 +218,12 @@ export function BacktestChart({
 }: BacktestChartProps) {
   const [pair, setPair] = React.useState(DEFAULT_PAIR);
   const [tf, setTf] = React.useState(DEFAULT_TF);
+
+  // Pair whitelist from /dashboard/chart/pairs — driven by crypto-bot config.
+  // Backend hard-fails if config is missing (Iron Law 3); empty defensive UI
+  // is a belt-and-suspenders guard only.
+  const { data: pairsData, isLoading: pairsLoading } = usePairs();
+  const pairs = pairsData ?? [];
 
   // OHLCV bounded to the test window — fall back to recent data if the
   // window has no rows in brain.ohlcv.
@@ -267,7 +279,7 @@ export function BacktestChart({
       h.equitySeries.setData([]);
       return;
     }
-    h.equitySeries.setData(buildEquityLine(detail.equity_curve));
+    h.equitySeries.setData(decimate(buildEquityLine(detail.equity_curve)));
   }, [detail]);
 
   // Push trade + regime markers
@@ -308,27 +320,33 @@ export function BacktestChart({
             role="tablist"
             aria-label="Pair"
           >
-            {PAIRS.map((p) => {
-              const active = p.value === pair;
-              return (
-                <button
-                  key={p.value}
-                  type="button"
-                  role="tab"
-                  aria-selected={active}
-                  data-active={active ? "true" : "false"}
-                  onClick={() => setPair(p.value)}
-                  className={cn(
-                    "rounded px-2.5 py-1 text-xs font-medium transition-colors",
-                    active
-                      ? "bg-primary text-primary-foreground"
-                      : "text-muted-foreground hover:bg-muted hover:text-foreground",
-                  )}
-                >
-                  {p.label}
-                </button>
-              );
-            })}
+            {pairsLoading ? (
+              <Skeleton className="h-6 w-24 rounded" />
+            ) : pairs.length === 0 ? (
+              <span className="px-2 text-xs text-muted-foreground">No pairs</span>
+            ) : (
+              pairs.map((p) => {
+                const active = p === pair;
+                return (
+                  <button
+                    key={p}
+                    type="button"
+                    role="tab"
+                    aria-selected={active}
+                    data-active={active ? "true" : "false"}
+                    onClick={() => setPair(p)}
+                    className={cn(
+                      "rounded px-2.5 py-1 text-xs font-medium transition-colors",
+                      active
+                        ? "bg-primary text-primary-foreground"
+                        : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                    )}
+                  >
+                    {p}
+                  </button>
+                );
+              })
+            )}
           </div>
           <div
             className="flex items-center gap-1 rounded-md border border-border bg-input p-0.5"

@@ -23,6 +23,13 @@ interface CalibrationPlotProps {
 // The "perfect calibration" reference line maps the X domain linearly onto the
 // Y domain — i.e. higher resize multiplier should correlate with higher win
 // rate. (It is NOT y=x because the two axes don't share a domain.)
+
+// Calibration accent — semantic data colour, not UI chrome.
+// These represent the calibration dot fill/stroke and should stay numeric
+// even when other chrome values move to CSS variables.
+const CALIBRATION_DOT_FILL = "rgba(16, 185, 129, 0.7)";
+const CALIBRATION_DOT_STROKE = "#10b981";
+
 const X_DOMAIN_LO = 0.5;
 const X_DOMAIN_HI = 1.5;
 
@@ -49,9 +56,9 @@ function CalibrationSvg({ calibration }: { calibration: FreqaiCalibration["calib
       aria-label="Calibration plot"
       className="overflow-visible"
     >
-      {/* Axes */}
-      <line x1={PAD} y1={PAD} x2={PAD} y2={H - PAD} stroke="#232331" strokeWidth={1} />
-      <line x1={PAD} y1={H - PAD} x2={W - PAD} y2={H - PAD} stroke="#232331" strokeWidth={1} />
+      {/* Axes — use CSS variables so they follow the theme */}
+      <line x1={PAD} y1={PAD} x2={PAD} y2={H - PAD} stroke="var(--border)" strokeWidth={1} />
+      <line x1={PAD} y1={H - PAD} x2={W - PAD} y2={H - PAD} stroke="var(--border)" strokeWidth={1} />
 
       {/* Grid lines: X at quartiles of the [0.5, 1.5] domain (= 0.75, 1.0, 1.25),
           Y at quartiles of [0, 1] (= 0.25, 0.5, 0.75). */}
@@ -62,7 +69,7 @@ function CalibrationSvg({ calibration }: { calibration: FreqaiCalibration["calib
           y1={PAD}
           x2={toX(v)}
           y2={H - PAD}
-          stroke="#1f1f2a"
+          stroke="var(--muted)"
           strokeWidth={1}
         />
       ))}
@@ -73,13 +80,13 @@ function CalibrationSvg({ calibration }: { calibration: FreqaiCalibration["calib
           y1={toY(v)}
           x2={W - PAD}
           y2={toY(v)}
-          stroke="#1f1f2a"
+          stroke="var(--muted)"
           strokeWidth={1}
         />
       ))}
 
       {/* Axis labels */}
-      <text x={PAD + plotW / 2} y={H - 2} textAnchor="middle" fontSize={9} fill="#888">
+      <text x={PAD + plotW / 2} y={H - 2} textAnchor="middle" fontSize={9} fill="var(--muted-foreground)">
         Predicted (size_mult)
       </text>
       <text
@@ -87,7 +94,7 @@ function CalibrationSvg({ calibration }: { calibration: FreqaiCalibration["calib
         y={PAD + plotH / 2}
         textAnchor="middle"
         fontSize={9}
-        fill="#888"
+        fill="var(--muted-foreground)"
         transform={`rotate(-90, 6, ${PAD + plotH / 2})`}
       >
         Actual win rate
@@ -100,7 +107,7 @@ function CalibrationSvg({ calibration }: { calibration: FreqaiCalibration["calib
         y1={toY(0)}
         x2={toX(X_DOMAIN_HI)}
         y2={toY(1)}
-        stroke="#4b5563"
+        stroke="var(--border)"
         strokeWidth={1}
         strokeDasharray="4 3"
       />
@@ -114,8 +121,8 @@ function CalibrationSvg({ calibration }: { calibration: FreqaiCalibration["calib
             cx={toX(b.predicted_mid)}
             cy={toY(b.actual_win_rate)}
             r={r}
-            fill="rgba(16, 185, 129, 0.7)"
-            stroke="#10b981"
+            fill={CALIBRATION_DOT_FILL}
+            stroke={CALIBRATION_DOT_STROKE}
             strokeWidth={1}
           >
             <title>

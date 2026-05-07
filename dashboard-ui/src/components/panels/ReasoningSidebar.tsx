@@ -13,6 +13,12 @@ import { Select } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 
+// Hoisted to module-level constant to prevent new array ref on every
+// render — an inline literal would cause useEffect dep churn → WS reconnect.
+const WS_CHANNELS: ReadonlyArray<NonNullable<WsMessage["channel"]>> = [
+  "dashboard_journal",
+];
+
 const DECISION_FILTERS: ReadonlyArray<{ value: string; label: string }> = [
   { value: "all", label: "All" },
   { value: "approve", label: "Approve" },
@@ -124,7 +130,7 @@ export function ReasoningSidebar({ className, wsToken }: ReasoningSidebarProps) 
   const { data, isLoading, error } = useJournal(params);
 
   const queryClient = useQueryClient();
-  const { lastMessage } = useDashboardWs(["dashboard_journal"], wsToken);
+  const { lastMessage } = useDashboardWs(WS_CHANNELS, wsToken);
 
   const [highlightedIds, setHighlightedIds] = React.useState<Set<number>>(
     new Set(),

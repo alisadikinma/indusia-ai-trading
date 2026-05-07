@@ -4,6 +4,7 @@ import * as React from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 
 import { useIterations } from "@/lib/api-client";
+import { ErrorBoundary } from "@/components/error-boundary";
 import type { IterationFilters } from "@/lib/api-types";
 import { IterationCard } from "@/components/panels/IterationCard";
 import { IterationFilters as IterationFiltersBar } from "@/components/panels/IterationFilters";
@@ -53,6 +54,7 @@ export function IterationHistoryClient() {
   const isFirstLoad = isLoading && !items;
 
   return (
+    <ErrorBoundary viewName="Iteration History">
     <main className="mx-auto w-full max-w-[1600px] flex-1 px-4 py-4">
       <header className="mb-4 flex flex-wrap items-end justify-between gap-3">
         <div>
@@ -169,5 +171,6 @@ export function IterationHistoryClient() {
         </Card>
       )}
     </main>
+    </ErrorBoundary>
   );
 }

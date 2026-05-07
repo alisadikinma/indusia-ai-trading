@@ -35,6 +35,7 @@ export function Header({
   const pathname = usePathname();
   const router = useRouter();
   const [signingOut, setSigningOut] = React.useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = React.useState(false);
 
   async function onSignOut() {
     setSigningOut(true);
@@ -60,14 +61,18 @@ export function Header({
       role="banner"
     >
       <div className="mx-auto flex h-14 max-w-[1600px] items-center gap-4 px-4">
-        <Link href="/dashboard" className="flex items-center gap-2">
+        <Link href="/dashboard" className="flex shrink-0 items-center gap-2">
           <span className="text-lg font-semibold tracking-tight">
-            <span className="text-primary">◤</span> Bot Cockpit
+            <span className="text-primary">◤</span>{" "}
+            <span className="hidden sm:inline">Bot Cockpit</span>
+            <span className="sm:hidden">Cockpit</span>
           </span>
         </Link>
+
+        {/* Desktop nav */}
         <nav
           className="hidden flex-1 items-center gap-1 md:flex"
-          aria-label="Main"
+          aria-label="Main navigation"
         >
           {NAV_LINKS.map((l) => {
             const active =
@@ -89,8 +94,10 @@ export function Header({
             );
           })}
         </nav>
-        <div className="flex flex-1 items-center justify-end gap-3 md:flex-none">
-          <Badge variant="outline" className="font-mono uppercase">
+
+        {/* Right side */}
+        <div className="flex flex-1 items-center justify-end gap-2 md:flex-none md:gap-3">
+          <Badge variant="outline" className="hidden font-mono uppercase sm:flex">
             {envTag}
           </Badge>
           <span className="hidden items-center gap-2 text-sm text-muted-foreground sm:flex">
@@ -99,7 +106,7 @@ export function Header({
                 "inline-block h-2 w-2 rounded-full",
                 dotClass,
               )}
-              aria-label={`API ${connectionState}`}
+              aria-label={`API connection ${connectionState}`}
             />
             <span className="font-medium text-foreground">{operator}</span>
           </span>
@@ -108,11 +115,96 @@ export function Header({
             size="sm"
             onClick={onSignOut}
             disabled={signingOut}
+            className="hidden md:inline-flex"
           >
-            {signingOut ? "Signing out..." : "Sign out"}
+            {signingOut ? "Signing out…" : "Sign out"}
           </Button>
+
+          {/* Mobile hamburger */}
+          <button
+            type="button"
+            className="inline-flex items-center justify-center rounded-md p-2 text-muted-foreground hover:bg-muted hover:text-foreground md:hidden"
+            aria-label={mobileMenuOpen ? "Close navigation menu" : "Open navigation menu"}
+            aria-expanded={mobileMenuOpen}
+            aria-controls="mobile-nav"
+            onClick={() => setMobileMenuOpen((v) => !v)}
+          >
+            {/* Hamburger icon using CSS — no external icon dep */}
+            <span className="sr-only">{mobileMenuOpen ? "Close menu" : "Open menu"}</span>
+            <svg
+              className="h-5 w-5"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={2}
+              aria-hidden="true"
+            >
+              {mobileMenuOpen ? (
+                <>
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                  <line x1="6" y1="6" x2="18" y2="18" />
+                </>
+              ) : (
+                <>
+                  <line x1="3" y1="7" x2="21" y2="7" />
+                  <line x1="3" y1="12" x2="21" y2="12" />
+                  <line x1="3" y1="17" x2="21" y2="17" />
+                </>
+              )}
+            </svg>
+          </button>
         </div>
       </div>
+
+      {/* Mobile nav drawer — shown below the header bar */}
+      {mobileMenuOpen ? (
+        <nav
+          id="mobile-nav"
+          className="border-t border-border bg-background px-4 pb-3 pt-2 md:hidden"
+          aria-label="Mobile navigation"
+        >
+          {NAV_LINKS.map((l) => {
+            const active =
+              pathname === l.href || pathname.startsWith(`${l.href}/`);
+            return (
+              <Link
+                key={l.href}
+                href={l.href}
+                onClick={() => setMobileMenuOpen(false)}
+                className={cn(
+                  "flex rounded-md px-3 py-2 text-sm transition-colors",
+                  active
+                    ? "bg-muted font-medium text-foreground"
+                    : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                )}
+                aria-current={active ? "page" : undefined}
+              >
+                {l.label}
+              </Link>
+            );
+          })}
+          <div className="mt-2 flex items-center justify-between border-t border-border pt-2">
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <span
+                className={cn("inline-block h-2 w-2 rounded-full", dotClass)}
+                aria-label={`API connection ${connectionState}`}
+              />
+              <span className="font-medium text-foreground">{operator}</span>
+              <Badge variant="outline" className="font-mono uppercase">
+                {envTag}
+              </Badge>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={onSignOut}
+              disabled={signingOut}
+            >
+              {signingOut ? "Signing out…" : "Sign out"}
+            </Button>
+          </div>
+        </nav>
+      ) : null}
     </header>
   );
 }

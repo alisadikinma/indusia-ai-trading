@@ -1,13 +1,53 @@
-"""GET /dashboard/chart/ohlcv — OHLCV time-series for the live chart view."""
+"""GET /dashboard/chart/ohlcv — OHLCV time-series for the live chart view.
+GET /dashboard/chart/pairs — pair whitelist from crypto-bot config.
+"""
 from __future__ import annotations
 
+import functools
+import json
 from datetime import datetime
+from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter, Query, Request
 from pydantic import BaseModel, ConfigDict
 
 router = APIRouter()
+
+# ---------------------------------------------------------------------------
+# /dashboard/chart/pairs — pair whitelist from crypto-bot/freqtrade-config/config.json.
+# ---------------------------------------------------------------------------
+
+# Path resolution: this file lives at:
+#   <repo>/pulse-bridge/pulse_bridge/dashboard_routes/chart.py
+# Three .parent() calls reach the repo root:
+#   parents[0]=dashboard_routes, [1]=pulse_bridge, [2]=pulse-bridge, [3]=<repo>.
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+_FREQTRADE_CONFIG = _REPO_ROOT / "crypto-bot" / "freqtrade-config" / "config.json"
+
+
+@functools.lru_cache(maxsize=1)
+def _load_pair_whitelist() -> list[str]:
+    """Read pair_whitelist from crypto-bot config. Hard-fails on any error (Iron Law 3)."""
+    raw = _FREQTRADE_CONFIG.read_text(encoding="utf-8")
+    cfg = json.loads(raw)
+    pairs = cfg["exchange"]["pair_whitelist"]
+    if not isinstance(pairs, list) or len(pairs) == 0:
+        raise RuntimeError(
+            f"pair_whitelist in {_FREQTRADE_CONFIG} is empty or not a list"
+        )
+    return [str(p) for p in pairs]
+
+
+@router.get("/pairs", response_model=list[str])
+async def get_pairs() -> list[str]:
+    """Return the operator-configured pair whitelist from crypto-bot config.
+
+    Hard-fails with HTTP 500 if config is missing or unparseable (Iron Law 3 —
+    no silent fallback to a default list). The config is operator-only; changes
+    require a service restart which clears the lru_cache.
+    """
+    return _load_pair_whitelist()
 
 
 class OhlcvPoint(BaseModel):

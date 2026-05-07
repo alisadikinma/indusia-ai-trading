@@ -7,6 +7,7 @@ import {
   brainJournalCsvUrl,
   useBrainJournalInfinite,
 } from "@/lib/api-client";
+import { ErrorBoundary } from "@/components/error-boundary";
 import type { BrainJournalFilters } from "@/lib/api-types";
 import { JournalEntry } from "@/components/panels/JournalEntry";
 import { JournalFilters } from "@/components/panels/JournalFilters";
@@ -146,8 +147,10 @@ export function JournalClient() {
   const isFirstLoad = isLoading && !data;
 
   return (
+    <ErrorBoundary viewName="Brain Journal">
     <main className="mx-auto w-full max-w-[1600px] flex-1 px-4 py-4">
-      <header className="mb-4 flex flex-wrap items-end justify-between gap-3">
+      {/* Header: stacks on sm, row on md+ */}
+      <header className="mb-4 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end sm:justify-between">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">
             Brain Journal
@@ -222,14 +225,17 @@ export function JournalClient() {
       ) : (
         <Card>
           <CardContent className="p-0">
-            {/* Header row labels — outside the virtualized scroll body. */}
-            <div className="grid grid-cols-12 gap-3 border-b border-border bg-muted/30 px-4 py-2 pl-12 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              <span className="col-span-3">Timestamp</span>
-              <span className="col-span-2">Regime</span>
-              <span className="col-span-1">Decision</span>
-              <span className="col-span-1">Conf.</span>
-              <span className="col-span-4">Reasoning</span>
-              <span className="col-span-1 justify-self-end">Outcome</span>
+            {/* Header row labels — outside the virtualized scroll body.
+                Wrapped in overflow-x-auto so columns don't squish on sm. */}
+            <div className="overflow-x-auto">
+              <div className="grid min-w-[640px] grid-cols-12 gap-3 border-b border-border bg-muted/30 px-4 py-2 pl-12 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                <span className="col-span-3">Timestamp</span>
+                <span className="col-span-2">Regime</span>
+                <span className="col-span-1">Decision</span>
+                <span className="col-span-1">Conf.</span>
+                <span className="col-span-4">Reasoning</span>
+                <span className="col-span-1 justify-self-end">Outcome</span>
+              </div>
             </div>
 
             <div
@@ -297,5 +303,6 @@ export function JournalClient() {
         </Card>
       )}
     </main>
+    </ErrorBoundary>
   );
 }

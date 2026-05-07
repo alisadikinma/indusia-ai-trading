@@ -5,11 +5,17 @@ import { useQueryClient } from "@tanstack/react-query";
 
 import { useOhlcv, usePositions } from "@/lib/api-client";
 import { useDashboardWs } from "@/lib/ws-client";
-import type { OhlcvPoint, Position } from "@/lib/api-types";
+import type { OhlcvPoint, Position, WsMessage } from "@/lib/api-types";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { cn } from "@/lib/utils";
+
+// Hoisted to module-level constant to prevent new array ref on every
+// render — an inline literal would cause useEffect dep churn → WS reconnect.
+const WS_CHANNELS: ReadonlyArray<NonNullable<WsMessage["channel"]>> = [
+  "dashboard_signals",
+];
 
 function fmtUsd(v: number): string {
   return new Intl.NumberFormat("en-US", {
@@ -127,7 +133,7 @@ export interface OpenPositionsProps {
 export function OpenPositions({ className, wsToken }: OpenPositionsProps) {
   const { data, isLoading, error } = usePositions();
   const queryClient = useQueryClient();
-  const { lastMessage } = useDashboardWs(["dashboard_signals"], wsToken);
+  const { lastMessage } = useDashboardWs(WS_CHANNELS, wsToken);
 
   React.useEffect(() => {
     if (!lastMessage) return;
