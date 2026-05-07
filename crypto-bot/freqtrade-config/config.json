@@ -73,5 +73,39 @@
   "strategy": "ClaudeOversightStrategy",
   "strategy_path": "freqtrade-config/strategies/",
   "datadir": "freqtrade-config/data",
-  "dataformat_ohlcv": "feather"
+  "dataformat_ohlcv": "feather",
+  "freqai": {
+    "enabled": true,
+    "purge_old_models": 4,
+    "train_period_days": 180,
+    "backtest_period_days": 30,
+    "live_retrain_hours": 24,
+    "identifier": "claude-oversight-v1",
+    "feature_parameters": {
+      "include_timeframes": ["15m"],
+      "include_corr_pairlist": [],
+      "label_period_candles": 16,
+      "include_shifted_candles": 2,
+      "DI_threshold": 0.9,
+      "weight_factor": 0.9,
+      "principal_component_analysis": false,
+      "use_SVM_to_remove_outliers": true,
+      "stratify_training_data": 0,
+      "indicator_periods_candles": [10, 20]
+    },
+    "data_split_parameters": {
+      "test_size": 0.25,
+      "shuffle": false,
+      "random_state": 42
+    },
+    "model_training_parameters": {
+      "n_estimators": 200,
+      "max_depth": 6,
+      "learning_rate": 0.05,
+      "verbosity": 0,
+      "n_jobs": -1
+    }
+  },
+  "freqaimodel": "ClaudeOversightModel",
+  "freqaimodel_path": "crypto-bot/freqtrade-config/freqaimodels"
 }

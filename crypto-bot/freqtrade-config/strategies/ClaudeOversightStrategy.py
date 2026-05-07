@@ -16,7 +16,12 @@ PULSE bridge for Claude's approve/veto/resize verdict before allowing the
 trade to fire. For now claude_decision stays NULL on the row, meaning
 "no oversight applied yet".
 
-Phase 7 will add a FreqAI prediction column gating entries.
+Phase 7 (this file): adds FreqAI feature engineering hooks + a target
+generator (predicts whether close 16 bars ahead = 4h is >2% higher) +
+gates ``populate_entry_trend`` on ``&-prediction > 0.65``. When the
+``&-prediction`` column is absent (FreqAI disabled, e.g. during pure
+Phase 3 backtests), the gate defaults to 1.0 so the strategy reverts
+to Phase 3 rule-based behavior — backward compat preserved.
 """
 from __future__ import annotations
 
@@ -70,6 +75,12 @@ class ClaudeOversightStrategy(IStrategy):
     timeframe = "15m"
     can_short = False  # Phase 3: spot-long only; futures shorts come later
 
+    # Phase 7 — FreqAI gate. The actual ``enabled`` flag and feature
+    # parameters live in config.json under the top-level "freqai" block;
+    # this attribute is the strategy-side switch Freqtrade checks before
+    # invoking feature_engineering_* hooks.
+    freqai_info: dict = {"enabled": True}
+
     # Hard floor stop. Real per-trade stop comes from custom_stoploss below.
     stoploss = -0.10
     trailing_stop = False
@@ -95,16 +106,99 @@ class ClaudeOversightStrategy(IStrategy):
         dataframe["atr14"] = ta.ATR(dataframe, timeperiod=14)
         return dataframe
 
+    # ----- FreqAI feature engineering (Phase 7) ----------------------------
+    def feature_engineering_expand_all(
+        self, dataframe: pd.DataFrame, period: int, metadata: dict, **kwargs
+    ) -> pd.DataFrame:
+        """Per-period base features. FreqAI expands these across the
+        ``indicator_periods_candles`` configured in config.json.
+
+        Naming convention: ``%-`` prefix marks a feature column. Freqtrade's
+        feature pipeline scans dataframes for this prefix.
+        """
+        dataframe[f"%-rsi-period_{period}"] = ta.RSI(dataframe, timeperiod=period)
+        dataframe[f"%-adx-period_{period}"] = ta.ADX(dataframe, timeperiod=period)
+        ema_col = ta.EMA(dataframe, timeperiod=period)
+        # Guard close==0 just in case (the divide is safe at runtime since
+        # crypto close > 0, but tests feed synthetic frames).
+        dataframe[f"%-ema_dist-period_{period}"] = (
+            dataframe["close"] - ema_col
+        ) / dataframe["close"].replace(0, pd.NA)
+        return dataframe
+
+    def feature_engineering_expand_basic(
+        self, dataframe: pd.DataFrame, metadata: dict, **kwargs
+    ) -> pd.DataFrame:
+        """Features computed once (not expanded per period).
+
+        Notes:
+          * 24h window on 15m timeframe = 96 bars.
+          * Multi-horizon returns + volatility capture trend persistence
+            across the timescales the strategy actually trades on.
+        """
+        vol_window = 96  # 24h on 15m
+        dataframe["%-volume_z_24h"] = (
+            (dataframe["volume"] - dataframe["volume"].rolling(vol_window).mean())
+            / dataframe["volume"].rolling(vol_window).std()
+        )
+        for h in [1, 4, 12, 24]:
+            bars = h * 4  # 4 bars per hour at 15m
+            dataframe[f"%-return_{h}h"] = dataframe["close"].pct_change(periods=bars)
+            if h <= 12:
+                dataframe[f"%-volatility_{h}h"] = (
+                    dataframe["close"].pct_change().rolling(bars).std()
+                )
+        return dataframe
+
+    def feature_engineering_standard(
+        self, dataframe: pd.DataFrame, metadata: dict, **kwargs
+    ) -> pd.DataFrame:
+        """Standard features computed once, post-base.
+
+        Currently a no-op — placeholder for downstream FreqAI versions
+        that may add cross-asset correlation features here.
+        """
+        return dataframe
+
+    def set_freqai_targets(
+        self, dataframe: pd.DataFrame, metadata: dict, **kwargs
+    ) -> pd.DataFrame:
+        """Target: 1 if close 16 bars ahead is >2% higher than current close.
+
+        16 bars on 15m = 4 hours forward. The 2% threshold is the strategy's
+        de facto take-profit target (matches the ``minimal_roi`` ladder's
+        first horizon). Last 16 rows have NaN futures → marked 0.
+        """
+        horizon = 16
+        future_close = dataframe["close"].shift(-horizon)
+        future_return = (future_close / dataframe["close"]) - 1
+        dataframe["&-prediction"] = (future_return > 0.02).fillna(False).astype(int)
+        return dataframe
+
     # ----- entry signal ----------------------------------------------------
     def populate_entry_trend(self, dataframe: pd.DataFrame, metadata: dict) -> pd.DataFrame:
+        # Phase 7 FreqAI gate. Default 1.0 when column absent → behaves as
+        # Phase 3 (backward compat with FreqAI-disabled backtests).
+        if "&-prediction" in dataframe.columns:
+            freqai_gate = dataframe["&-prediction"]
+        else:
+            freqai_gate = pd.Series(1.0, index=dataframe.index)
+
         cond = (
             (dataframe["ema20"] > dataframe["ema50"])
             & (dataframe["adx14"] > 25)
             & (dataframe["close"] > dataframe["ema20"])
             & (dataframe["volume"] > 0)
+            & (freqai_gate > 0.65)
         )
         dataframe.loc[cond, "enter_long"] = 1
-        dataframe.loc[cond, "enter_tag"] = "trend_ema_cross_adx"
+        # Use explicit tag so backtest analytics can distinguish Phase 3
+        # rule-only entries from Phase 7 ML-gated entries by inspecting the
+        # tag column.
+        if "&-prediction" in dataframe.columns:
+            dataframe.loc[cond, "enter_tag"] = "trend_ema_cross_adx_ml"
+        else:
+            dataframe.loc[cond, "enter_tag"] = "trend_ema_cross_adx"
         return dataframe
 
     # ----- exit signal -----------------------------------------------------
