@@ -49,6 +49,34 @@ export interface EquityPoint {
   drawdown_pct: number;
 }
 
+export interface BacktestMetrics {
+  sharpe?: number;
+  sortino?: number;
+  max_dd?: number;
+  profit_factor?: number;
+  total_trades?: number;
+  win_rate?: number;
+  expectancy?: number;
+  [k: string]: unknown;
+}
+
+export interface BacktestEquityPoint {
+  ts: string;
+  equity: number;
+}
+
+export interface BacktestTrade {
+  ts: string;
+  side?: "long" | "short" | string;
+  price?: number;
+  pnl_pct?: number;
+  pnl?: number;
+  pair?: string;
+  exit_ts?: string;
+  exit_price?: number;
+  [k: string]: unknown;
+}
+
 export interface BacktestRunMeta {
   id: number;
   started_at: string;
@@ -59,16 +87,24 @@ export interface BacktestRunMeta {
   train_end: string;
   test_start: string;
   test_end: string;
-  metrics: Record<string, unknown>;
+  metrics: BacktestMetrics;
   gate_passed: boolean;
   notes: string | null;
 }
 
 export interface BacktestRunDetail extends BacktestRunMeta {
   parameters: Record<string, unknown>;
-  equity_curve: unknown | null;
-  trades: unknown | null;
+  equity_curve: BacktestEquityPoint[] | null;
+  trades: BacktestTrade[] | null;
 }
+
+// Phase 9 gate criteria — Iron Law 2.
+export const PHASE_9_GATES = {
+  sharpe_min: 1.5,
+  max_dd_max: 0.25,
+  profit_factor_min: 1.4,
+  total_trades_min: 100,
+} as const;
 
 export interface FreqaiCalibration {
   calibration: Array<Record<string, unknown>>;
