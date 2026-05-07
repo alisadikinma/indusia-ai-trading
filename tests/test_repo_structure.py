@@ -101,6 +101,55 @@ def test_polymarket_bot_readme_exists_with_phase_plan_marker() -> None:
     )
 
 
+# ---------------------------------------------------------------------------
+# References RAG layer scaffold (Phase F)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize(
+    "relative_dir",
+    [
+        "references",
+        "references/crypto",
+        "references/crypto/compiled",
+        "references/polymarket",
+        "references/polymarket/compiled",
+        "references/shared",
+    ],
+)
+def test_references_scaffold_dirs(relative_dir: str) -> None:
+    target = REPO_ROOT / relative_dir
+    assert target.is_dir(), f"references scaffold incomplete: {relative_dir}/ not found"
+
+
+def test_references_readme_exists() -> None:
+    """references/README.md must explain the 5-tier knowledge anatomy + workflow."""
+    readme = REPO_ROOT / "references" / "README.md"
+    assert readme.is_file(), "references/README.md missing"
+    body = readme.read_text(encoding="utf-8")
+    assert len(body) >= 600, (
+        f"references/README.md too thin ({len(body)} chars, need >=600)"
+    )
+
+
+def test_global_trading_config_exists_with_required_sections() -> None:
+    """references/global-trading-config.md is the cross-bot invariant reference.
+    Must contain Iron Laws, JSON contract, precedence per ADR-002."""
+    cfg = REPO_ROOT / "references" / "global-trading-config.md"
+    assert cfg.is_file(), "references/global-trading-config.md missing"
+    body = cfg.read_text(encoding="utf-8")
+    required_sections = [
+        "## Iron Laws Summary",
+        "## Brain",  # matches "## Brain ↔ Body JSON Contract" without unicode arrow
+        "## Precedence Order",
+        "## Cross-bot invariants",
+    ]
+    missing = [s for s in required_sections if s not in body]
+    assert not missing, f"global-trading-config.md missing sections: {missing}"
+    assert len(body) >= 1500, (
+        f"global-trading-config.md too thin ({len(body)} chars, need >=1500)"
+    )
+
+
 def test_freqtrade_submodule_is_populated() -> None:
     """freqtrade-fork/ must be a populated git submodule, not an empty dir."""
     freqtrade_dir = REPO_ROOT / "freqtrade-fork"
