@@ -50,7 +50,10 @@ http:
     # (Host && PathPrefix) holds.
     # ---------------------------------------------------------------
     ai-trading-api:
-      rule: "Host(`ai-trading.alisadikinma.com`) && PathPrefix(`/dashboard`)"
+      # Trailing slash on PathPrefix matters: `/dashboard/` matches
+      # `/dashboard/foo` (API calls) but NOT bare `/dashboard` (Next.js
+      # page). Without the slash, /dashboard would hit FastAPI and 404.
+      rule: "Host(`ai-trading.alisadikinma.com`) && PathPrefix(`/dashboard/`)"
       entryPoints:
         - websecure
       service: ai-trading-api

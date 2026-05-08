@@ -54,10 +54,17 @@ cd ~/ai-trading
 # 2. Build .env at ~/.ai-trading/.env (operator-managed, not in repo)
 mkdir -p ~/.ai-trading
 chmod 700 ~/.ai-trading
-# Populate with: PG_USER, PG_PASS, PG_DB, DATABASE_URL,
-#                DASHBOARD_JWT_SECRET (32+ chars),
-#                DASHBOARD_OPERATOR_USERNAME,
-#                DASHBOARD_OPERATOR_PASSWORD_ARGON2_HASH
+# Populate with:
+#   PG_USER, PG_PASS, PG_DB, PG_HOST, PG_PORT, DATABASE_URL
+#   POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_HOST, POSTGRES_PORT, POSTGRES_DB
+#       (pulse-bridge dashboard_main expects POSTGRES_*; mirror PG_* values)
+#   DASHBOARD_JWT_SECRET (32+ chars; openssl rand -base64 48)
+#   DASHBOARD_OPERATOR_USERNAME
+#   DASHBOARD_OPERATOR_PASSWORD_ARGON2_HASH (single-quote the value to keep
+#       bash from expanding $argon2id under set -u)
+#   DASHBOARD_UI_ORIGIN=https://ai-trading.alisadikinma.com (CORS allow-list)
+#   NEXT_PUBLIC_DASHBOARD_API_URL=https://ai-trading.alisadikinma.com
+#   NEXT_PUBLIC_DASHBOARD_WS_URL=wss://ai-trading.alisadikinma.com/dashboard/ws
 
 # 3. Author systemd units (one-time; deploy.sh skips with warning if missing)
 sudo tee /etc/systemd/system/dashboard-ui.service <<'EOF'
@@ -71,7 +78,9 @@ User=claudesn
 WorkingDirectory=/home/claudesn/ai-trading/dashboard-ui
 EnvironmentFile=/home/claudesn/.ai-trading/.env
 Environment=PORT=3000
-Environment=HOSTNAME=127.0.0.1
+# 172.17.0.1 = docker bridge gw, reachable from the Traefik container
+# without exposing :3000 to the public internet (matches portfolio.yml).
+Environment=HOSTNAME=172.17.0.1
 ExecStart=/usr/bin/node .next/standalone/server.js
 Restart=on-failure
 RestartSec=5
@@ -82,7 +91,7 @@ EOF
 
 sudo tee /etc/systemd/system/pulse-bridge.service <<'EOF'
 [Unit]
-Description=AI-Trading pulse-bridge (FastAPI)
+Description=AI-Trading pulse-bridge dashboard API (FastAPI)
 After=network.target postgresql.service
 
 [Service]
@@ -90,7 +99,12 @@ Type=simple
 User=claudesn
 WorkingDirectory=/home/claudesn/ai-trading
 EnvironmentFile=/home/claudesn/.ai-trading/.env
-ExecStart=/home/claudesn/ai-trading/.venv/bin/uvicorn pulse_bridge.main:app --host 127.0.0.1 --port 8081
+# dashboard_main:app serves /dashboard/* (read-only UI API).
+# main:app (brain<->body /v1/* HMAC bridge) is a separate service —
+# add a second unit on a different port when Phase 4 brings it online.
+# Bind to 172.17.0.1 (docker bridge gw) so the Traefik container can
+# reach it without exposing :8081 to the public internet.
+ExecStart=/home/claudesn/ai-trading/.venv/bin/uvicorn pulse_bridge.dashboard_main:app --host 172.17.0.1 --port 8081
 Restart=on-failure
 RestartSec=5
 
