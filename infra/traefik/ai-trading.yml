@@ -1,0 +1,88 @@
+# Traefik dynamic config for ai-trading.alisadikinma.com
+#
+# DEPLOY SLOT: drop into the VPS Traefik dynamic-config dir AFTER Phase 9
+# walk-forward gate passes (Iron Law 2 — no public deploy until backtest
+# gate green). Drop location on VPS:
+#
+#     /opt/n8n/traefik/dynamic/ai-trading.yml
+#
+# (Same dir Traefik already watches for sparkfluence + jobhunter +
+# labelstudio. File-watch reload is automatic; no Traefik restart needed.)
+#
+# Routing model:
+#
+#   ai-trading.alisadikinma.com           -> Next.js cockpit on 127.0.0.1:3000
+#   ai-trading.alisadikinma.com/dashboard -> FastAPI pulse-bridge on 127.0.0.1:8081
+#   ai-trading.alisadikinma.com/dashboard/ws (WebSocket) -> same FastAPI
+#
+# Both dashboard-ui and pulse-bridge run as systemd units bound to 127.0.0.1
+# only — Traefik is the only public ingress (just like jobhunter, sparkfluence,
+# labelstudio).
+#
+# TLS: Let's Encrypt issuance via Traefik's existing letsencrypt resolver
+# (HTTP-01 challenge, port 80 already provisioned). Cert auto-renews.
+#
+# Ports referenced (see Phase 1.5.I deploy plan):
+#   - 3000  : dashboard-ui Next.js standalone (PORT env)
+#   - 8081  : pulse-bridge FastAPI uvicorn (port :8000 already taken on VPS
+#             by another tenant — confirmed in 2026-05-07 VPS survey;
+#             pulse-bridge MUST use 8081 or another free port)
+
+http:
+  routers:
+    # ---------------------------------------------------------------
+    # Plain HTTP -> HTTPS redirect (matches sparkfluence convention)
+    # ---------------------------------------------------------------
+    ai-trading-redirect:
+      rule: "Host(`ai-trading.alisadikinma.com`)"
+      entryPoints:
+        - web
+      middlewares:
+        - redirect-https@file
+      service: ai-trading-ui  # service required by Traefik even on redirect
+
+    # ---------------------------------------------------------------
+    # /dashboard/* -> FastAPI pulse-bridge (HTTPS)
+    #
+    # The pulse-bridge router must take precedence over the catch-all
+    # UI router below. Traefik prioritizes longer rules by default
+    # (PathPrefix match adds specificity), so jobhunter-api convention
+    # (Host && PathPrefix) holds.
+    # ---------------------------------------------------------------
+    ai-trading-api:
+      rule: "Host(`ai-trading.alisadikinma.com`) && PathPrefix(`/dashboard`)"
+      entryPoints:
+        - websecure
+      service: ai-trading-api
+      tls:
+        certResolver: letsencrypt
+      # No middlewares: pulse-bridge handles its own JWT auth (verifySession).
+      # If a future operator wants Cloudflare Access edge-auth, add it at
+      # the Cloudflare layer, not here.
+
+    # ---------------------------------------------------------------
+    # / -> Next.js cockpit (HTTPS)
+    # ---------------------------------------------------------------
+    ai-trading-ui:
+      rule: "Host(`ai-trading.alisadikinma.com`)"
+      entryPoints:
+        - websecure
+      service: ai-trading-ui
+      tls:
+        certResolver: letsencrypt
+
+  services:
+    ai-trading-ui:
+      loadBalancer:
+        servers:
+          - url: "http://127.0.0.1:3000"
+        # Health check: Next.js standalone responds 200 on /login (public route).
+        # Tune passHostHeader=true so Server Components see the public hostname
+        # for cookie sameSite + secure flag derivation.
+        passHostHeader: true
+
+    ai-trading-api:
+      loadBalancer:
+        servers:
+          - url: "http://127.0.0.1:8081"
+        passHostHeader: true
