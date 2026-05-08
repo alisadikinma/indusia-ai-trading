@@ -64,8 +64,8 @@ export function Header({
         <Link href="/dashboard" className="flex shrink-0 items-center gap-2">
           <span className="text-lg font-semibold tracking-tight">
             <span className="text-primary">◤</span>{" "}
-            <span className="hidden sm:inline">Bot Cockpit</span>
-            <span className="sm:hidden">Cockpit</span>
+            <span className="hidden sm:inline">Indusia AI Trading</span>
+            <span className="sm:hidden">Indusia</span>
           </span>
         </Link>
 

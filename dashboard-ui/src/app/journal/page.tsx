@@ -2,7 +2,7 @@ import { Header } from "@/components/layout/header";
 import { JournalClient } from "./journal-client";
 import { requireOperatorSession } from "@/lib/auth";
 
-export const metadata = { title: "Brain Journal — Bot Cockpit" };
+export const metadata = { title: "Brain Journal — Indusia AI Trading" };
 // Reading the session cookie + env-required JWT secret means this page is
 // inherently dynamic; opt out of static rendering loudly.
 export const dynamic = "force-dynamic";

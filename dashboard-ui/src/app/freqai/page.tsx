@@ -2,7 +2,7 @@ import { Header } from "@/components/layout/header";
 import { FreqaiClient } from "./freqai-client";
 import { requireOperatorSession } from "@/lib/auth";
 
-export const metadata = { title: "FreqAI Insights — Bot Cockpit" };
+export const metadata = { title: "FreqAI Insights — Indusia AI Trading" };
 // Reading the session cookie means this page is dynamic; opt out of static rendering.
 export const dynamic = "force-dynamic";
 

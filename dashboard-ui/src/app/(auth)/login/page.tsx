@@ -9,7 +9,7 @@ import {
 import { LoginForm } from "./login-form";
 
 export const metadata = {
-  title: "Sign in — Bot Cockpit",
+  title: "Sign in — Indusia AI Trading",
 };
 
 // useSearchParams() inside <LoginForm /> requires a Suspense boundary to
@@ -21,7 +21,7 @@ export default function LoginPage() {
     <main className="min-h-screen flex items-center justify-center px-4">
       <Card className="w-full max-w-sm">
         <CardHeader>
-          <CardTitle>Bot Cockpit</CardTitle>
+          <CardTitle>Indusia AI Trading</CardTitle>
           <CardDescription>
             Operator sign-in. Tailscale-only access.
           </CardDescription>

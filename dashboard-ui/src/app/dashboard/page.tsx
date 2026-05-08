@@ -2,7 +2,7 @@ import { Header } from "@/components/layout/header";
 import { DashboardClient } from "./dashboard-client";
 import { requireOperatorSession } from "@/lib/auth";
 
-export const metadata = { title: "Live Dashboard — Bot Cockpit" };
+export const metadata = { title: "Live Dashboard — Indusia AI Trading" };
 // Reading the session cookie + env-required JWT secret means this page is
 // inherently dynamic; opt out of static rendering loudly.
 export const dynamic = "force-dynamic";

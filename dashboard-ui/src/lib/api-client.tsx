@@ -41,7 +41,7 @@ function requirePublicEnv(name: string): string {
   if (!value || value.length === 0) {
     throw new Error(
       `Missing required public environment variable: ${name}. ` +
-        "The Bot Cockpit refuses to start without an explicit dashboard API URL.",
+        "Indusia AI Trading refuses to start without an explicit dashboard API URL.",
     );
   }
   return value;

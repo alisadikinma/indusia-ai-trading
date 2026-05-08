@@ -2,7 +2,7 @@ import { Header } from "@/components/layout/header";
 import { IterationHistoryClient } from "./iteration-history-client";
 import { requireOperatorSession } from "@/lib/auth";
 
-export const metadata = { title: "Iteration History — Bot Cockpit" };
+export const metadata = { title: "Iteration History — Indusia AI Trading" };
 // Reading the session cookie means this page is dynamic; opt out of static rendering.
 export const dynamic = "force-dynamic";
 

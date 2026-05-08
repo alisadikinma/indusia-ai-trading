@@ -14,8 +14,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Bot Cockpit",
-  description: "AI Trading 24/7 — operator console (Tailscale-only).",
+  title: "Indusia AI Trading",
+  description: "Indusia AI Trading 24/7 — operator console.",
 };
 
 export default function RootLayout({

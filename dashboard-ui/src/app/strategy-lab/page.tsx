@@ -2,7 +2,7 @@ import { Header } from "@/components/layout/header";
 import { StrategyLabClient } from "./strategy-lab-client";
 import { requireOperatorSession } from "@/lib/auth";
 
-export const metadata = { title: "Strategy Lab — Bot Cockpit" };
+export const metadata = { title: "Strategy Lab — Indusia AI Trading" };
 // Reading the session cookie + env-required JWT secret means this page is
 // inherently dynamic; opt out of static rendering loudly.
 export const dynamic = "force-dynamic";
