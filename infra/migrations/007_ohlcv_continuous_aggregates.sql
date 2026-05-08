@@ -44,15 +44,13 @@ WHERE tf = '1m'
 GROUP BY 1, pair, source
 WITH NO DATA;
 
-DO $$ BEGIN
-    PERFORM add_continuous_aggregate_policy(
-        'brain.ohlcv_5m',
-        start_offset      => INTERVAL '7 days',
-        end_offset        => INTERVAL '10 minutes',
-        schedule_interval => INTERVAL '5 minutes'
-    );
-EXCEPTION WHEN duplicate_object OR unique_violation THEN NULL;
-END $$;
+SELECT add_continuous_aggregate_policy(
+    'brain.ohlcv_5m',
+    start_offset      => INTERVAL '7 days',
+    end_offset        => INTERVAL '10 minutes',
+    schedule_interval => INTERVAL '5 minutes',
+    if_not_exists     => TRUE
+);
 
 -- ---------------------------------------------------------------------------
 -- 15m
@@ -73,15 +71,13 @@ WHERE tf = '1m'
 GROUP BY 1, pair, source
 WITH NO DATA;
 
-DO $$ BEGIN
-    PERFORM add_continuous_aggregate_policy(
-        'brain.ohlcv_15m',
-        start_offset      => INTERVAL '14 days',
-        end_offset        => INTERVAL '30 minutes',
-        schedule_interval => INTERVAL '15 minutes'
-    );
-EXCEPTION WHEN duplicate_object OR unique_violation THEN NULL;
-END $$;
+SELECT add_continuous_aggregate_policy(
+    'brain.ohlcv_15m',
+    start_offset      => INTERVAL '14 days',
+    end_offset        => INTERVAL '30 minutes',
+    schedule_interval => INTERVAL '15 minutes',
+    if_not_exists     => TRUE
+);
 
 -- ---------------------------------------------------------------------------
 -- 1h
@@ -102,15 +98,13 @@ WHERE tf = '1m'
 GROUP BY 1, pair, source
 WITH NO DATA;
 
-DO $$ BEGIN
-    PERFORM add_continuous_aggregate_policy(
-        'brain.ohlcv_1h',
-        start_offset      => INTERVAL '30 days',
-        end_offset        => INTERVAL '2 hours',
-        schedule_interval => INTERVAL '1 hour'
-    );
-EXCEPTION WHEN duplicate_object OR unique_violation THEN NULL;
-END $$;
+SELECT add_continuous_aggregate_policy(
+    'brain.ohlcv_1h',
+    start_offset      => INTERVAL '30 days',
+    end_offset        => INTERVAL '2 hours',
+    schedule_interval => INTERVAL '1 hour',
+    if_not_exists     => TRUE
+);
 
 -- ---------------------------------------------------------------------------
 -- 4h
@@ -131,15 +125,13 @@ WHERE tf = '1m'
 GROUP BY 1, pair, source
 WITH NO DATA;
 
-DO $$ BEGIN
-    PERFORM add_continuous_aggregate_policy(
-        'brain.ohlcv_4h',
-        start_offset      => INTERVAL '90 days',
-        end_offset        => INTERVAL '8 hours',
-        schedule_interval => INTERVAL '4 hours'
-    );
-EXCEPTION WHEN duplicate_object OR unique_violation THEN NULL;
-END $$;
+SELECT add_continuous_aggregate_policy(
+    'brain.ohlcv_4h',
+    start_offset      => INTERVAL '90 days',
+    end_offset        => INTERVAL '8 hours',
+    schedule_interval => INTERVAL '4 hours',
+    if_not_exists     => TRUE
+);
 
 -- ---------------------------------------------------------------------------
 -- 1d
@@ -160,15 +152,13 @@ WHERE tf = '1m'
 GROUP BY 1, pair, source
 WITH NO DATA;
 
-DO $$ BEGIN
-    PERFORM add_continuous_aggregate_policy(
-        'brain.ohlcv_1d',
-        start_offset      => INTERVAL '365 days',
-        end_offset        => INTERVAL '2 days',
-        schedule_interval => INTERVAL '1 day'
-    );
-EXCEPTION WHEN duplicate_object OR unique_violation THEN NULL;
-END $$;
+SELECT add_continuous_aggregate_policy(
+    'brain.ohlcv_1d',
+    start_offset      => INTERVAL '365 days',
+    end_offset        => INTERVAL '2 days',
+    schedule_interval => INTERVAL '1 day',
+    if_not_exists     => TRUE
+);
 
 COMMIT;
 
