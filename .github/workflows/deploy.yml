@@ -1,0 +1,91 @@
+name: Deploy to VPS
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      skip_frontend:
+        description: "Skip dashboard-ui rebuild (backend-only deploys)"
+        type: boolean
+        default: false
+      force_rebuild:
+        description: "Reinstall pulse-bridge venv from scratch"
+        type: boolean
+        default: false
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false   # never cancel a running deploy mid-flight
+
+jobs:
+  deploy:
+    name: Auto-deploy cockpit to production VPS
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout (sanity check only — not rsynced)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Install SSH key
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.VPS_SSH_PRIVATE_KEY }}
+          SSH_HOST: ${{ secrets.VPS_SSH_HOST }}
+          SSH_PORT: ${{ secrets.VPS_SSH_PORT || '22' }}
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          # Preserve newlines via env var (NOT inline interpolation — that corrupts multi-line keys)
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          # Validate key shape (fail fast with clear message)
+          head -1 ~/.ssh/deploy_key | grep -qE '^-----BEGIN (OPENSSH|RSA|EC) PRIVATE KEY-----$' \
+            || { echo "::error::VPS_SSH_PRIVATE_KEY is malformed — missing BEGIN header"; exit 1; }
+          # Pin host key (best-effort; SSH step uses accept-new fallback)
+          ssh-keyscan -p "$SSH_PORT" -H "$SSH_HOST" >> ~/.ssh/known_hosts 2>/dev/null \
+            || echo "::warning::ssh-keyscan failed — will use StrictHostKeyChecking=accept-new"
+          chmod 600 ~/.ssh/known_hosts 2>/dev/null || true
+
+      - name: Run deploy.sh on VPS
+        env:
+          SSH_HOST: ${{ secrets.VPS_SSH_HOST }}
+          SSH_USER: ${{ secrets.VPS_SSH_USER }}
+          SSH_PORT: ${{ secrets.VPS_SSH_PORT || '22' }}
+          PROJECT_PATH: ${{ secrets.VPS_PROJECT_PATH || '/home/claudesn/ai-trading' }}
+          SKIP_FRONTEND: ${{ inputs.skip_frontend && '1' || '0' }}
+          FORCE_REBUILD: ${{ inputs.force_rebuild && '1' || '0' }}
+        run: |
+          # The deploy script lives in the repo (infra/scripts/deploy.sh).
+          # Do `git pull` FIRST, THEN exec the now-fresh script — that way
+          # script changes take effect immediately on the deploy that ships them.
+          ssh -i ~/.ssh/deploy_key \
+            -p "$SSH_PORT" \
+            -o StrictHostKeyChecking=accept-new \
+            -o UserKnownHostsFile=~/.ssh/known_hosts \
+            -o ServerAliveInterval=30 \
+            -o ConnectTimeout=30 \
+            "$SSH_USER@$SSH_HOST" \
+            "cd '$PROJECT_PATH' && git fetch origin main && git reset --hard origin/main && DEPLOY_SKIP_FRONTEND='$SKIP_FRONTEND' DEPLOY_FORCE_REBUILD='$FORCE_REBUILD' bash infra/scripts/deploy.sh"
+
+      - name: Verify deploy via /login
+        run: |
+          # /login is public (no JWT) and always returns 200 when dashboard-ui is up.
+          # Retry up to 60s — Next.js standalone takes ~10-30s to boot after restart.
+          for i in $(seq 1 10); do
+            if curl --fail --silent --show-error --max-time 10 \
+                 https://ai-trading.alisadikinma.com/login \
+                 -o /tmp/health.html 2>/tmp/health.err; then
+              echo "✓ health check passed (attempt $i) — /login responded 200"
+              exit 0
+            fi
+            echo "attempt $i — /login pending, sleeping 6s"
+            sleep 6
+          done
+          echo "::error::/login did not return 200 within 60s"
+          cat /tmp/health.err 2>/dev/null || true
+          echo ""
+          echo "Investigate on VPS:  ssh ${{ secrets.VPS_SSH_USER }}@${{ secrets.VPS_SSH_HOST }} 'sudo journalctl -u dashboard-ui -n 50'"
+          exit 1

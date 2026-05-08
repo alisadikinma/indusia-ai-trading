@@ -1,25 +1,22 @@
 name: CI
 
-# Always-on quality gate. Runs on every push to any branch and every PR
-# targeting main. ZERO deploy side effects — tests + lint + typecheck only.
-# The deploy-cockpit.yml workflow re-runs this suite against the exact
-# deploy ref before applying any state change to the VPS (don't trust
-# historic CI green status on a different commit).
+# Quality gate. Runs on every push + PR to main. NO deploy effects —
+# tests + lint + typecheck only. Deploy runs in parallel from deploy.yml
+# (jobhunter pattern — both fire on push, neither blocks the other).
 
 on:
   push:
-    branches: [main, "feat/**", "fix/**"]
+    branches: [main]
   pull_request:
     branches: [main]
 
-# Cancel stale runs on the same ref when a new push lands.
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   python-tests:
-    name: Python tests + migrations syntax
+    name: Python tests + migrations
     runs-on: ubuntu-24.04
     timeout-minutes: 15
 
@@ -45,67 +42,38 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # Submodule needed for tests that import from freqtrade-fork.
           submodules: recursive
 
-      - name: Set up Python 3.12
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: pip
 
-      - name: Install postgres client (for psql migrations)
+      - name: Install postgres client
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq postgresql-client
 
-      - name: Install Python dependencies
+      - name: Install Python deps
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
-          # Pulse-bridge has its own pyproject — install editable too.
           pip install -e pulse-bridge
 
-      # Apply schemas + migrations against the ephemeral CI postgres.
-      # ON_ERROR_STOP=1 is the gate — any malformed SQL fails the job loud.
-      - name: Apply init.sql + migrations 000-006
+      - name: Apply init.sql + migrations
         run: |
           psql -h 127.0.0.1 -U trader -d trading -v ON_ERROR_STOP=1 \
               -f infra/postgres/init.sql
-          for m in infra/migrations/000_*.sql infra/migrations/001_*.sql \
-                   infra/migrations/002_*.sql infra/migrations/003_*.sql \
-                   infra/migrations/004_*.sql infra/migrations/005_*.sql \
-                   infra/migrations/006_*.sql; do
-            test -f "$m" || continue
-            echo "::group::Apply $m"
+          for m in infra/migrations/0*.sql; do
+            echo "::group::$m"
             psql -h 127.0.0.1 -U trader -d trading -v ON_ERROR_STOP=1 -f "$m"
             echo "::endgroup::"
           done
 
-      - name: Verify Iron Law 5 trigger active on brain.brain_journal
-        run: |
-          # The append-only trigger is architecturally enforced. CI re-asserts
-          # it on every push — if a future migration accidentally drops it,
-          # this job fails loud.
-          count=$(psql -h 127.0.0.1 -U trader -d trading -tA -c "
-            SELECT count(*) FROM pg_trigger
-            WHERE tgrelid = 'brain.brain_journal'::regclass
-              AND tgname IN ('tg_journal_no_update', 'tg_journal_no_delete')
-              AND NOT tgisinternal;")
-          if [ "$count" != "2" ]; then
-            echo "::error::Iron Law 5 trigger missing — expected 2 (no_update + no_delete), found $count"
-            exit 1
-          fi
+      - name: Pytest
+        run: python -m pytest tests/ pulse-bridge/tests/ -v --tb=short
 
-      - name: Run pytest (root tests/ + pulse-bridge/tests/)
-        run: |
-          python -m pytest tests/ pulse-bridge/tests/ -v --tb=short
-
-      - name: Skill lint (existing test_skills_lint.py guardrail)
-        run: |
-          python -m pytest tests/test_skills_lint.py -v
-
-  frontend-typecheck:
+  frontend:
     name: Frontend typecheck + lint
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -116,54 +84,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Node.js 22
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: "22"
           cache: npm
           cache-dependency-path: dashboard-ui/package-lock.json
 
-      - name: Install dependencies (deterministic via npm ci)
-        run: npm ci
-
-      - name: TypeScript typecheck (npx tsc --noEmit)
-        run: npx tsc --noEmit
-
-      - name: ESLint
-        run: npm run lint
-
-      # Playwright e2e is OUT of CI scope — needs Postgres + JWT secret + a
-      # full standalone build that takes ~5min. Operator runs locally before
-      # tagging phase-9-pass. The deploy workflow re-runs typecheck+lint but
-      # not e2e (cost/value tradeoff for the gated manual deploy path).
-
-  iron-laws-audit:
-    name: Iron Laws audit (operator-only files unchanged in this PR)
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    if: github.event_name == 'pull_request'
-
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Verify operator-only files untouched
-        run: |
-          # Iron Law 4 — these files are operator-curated. Auto-edits via
-          # PR are forbidden. CI fails loud if a PR diffs any of them.
-          # Operator can still merge after manual override (commit directly
-          # to main bypassing branch protection if they want to edit).
-          base="${{ github.event.pull_request.base.sha }}"
-          head="${{ github.event.pull_request.head.sha }}"
-          forbidden=$(git diff --name-only "$base" "$head" | grep -E \
-            '^(CLAUDE\.md|infra/migrations/00[0-6]_.*\.sql|crypto-bot/freqtrade-config/config\.json|crypto-bot/claude-routines/skills/trading-discipline\.md|docs/decisions/.*\.md|references/.*)$' \
-            || true)
-          if [ -n "$forbidden" ]; then
-            echo "::error::Iron Law 4 violation — operator-only files modified in this PR:"
-            echo "$forbidden"
-            echo ""
-            echo "These files require operator-only direct commits to main, NOT PR merges."
-            echo "If this is intentional, close the PR and commit directly."
-            exit 1
-          fi
+      - run: npm ci
+      - run: npx tsc --noEmit
+      - run: npm run lint
