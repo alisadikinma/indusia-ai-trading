@@ -1,0 +1,237 @@
+name: Deploy cockpit (manual, gated by Phase 9)
+
+# MANUAL TRIGGER ONLY. Auto-deploy of capital-at-stake code is forbidden
+# by Iron Law 2 (no live trade without backtest gate green). This workflow:
+#
+#   1. Refuses to fire unless an annotated tag matching `phase-9-pass-*`
+#      points at the deploy ref AND a corresponding ADR exists under
+#      docs/decisions/. (Defence-in-depth: tag is easy to add by mistake;
+#      ADR requires human writeup.)
+#
+#   2. Re-runs the CI suite against this exact ref before any side effect
+#      on the VPS. Don't trust the historic CI status — the deploy ref
+#      might be different from what last passed CI.
+#
+#   3. Builds the dashboard-ui standalone, rsyncs the artifact + the
+#      pulse-bridge source + the Traefik dynamic config to the VPS via
+#      a restricted SSH deploy key (authorized_keys command="..." lockdown).
+#      Triggers `~/bin/deploy-cockpit.sh` on the VPS, which is the only
+#      command the deploy key is permitted to run.
+#
+#   4. Smoke tests the live URL. Rollback (handled by the VPS deploy
+#      script) if smoke fails.
+#
+# Iron Law boundary: this workflow deploys the COCKPIT only — dashboard-ui
+# (Next.js) + pulse-bridge (FastAPI). It does NOT deploy the trading body
+# (crypto-bot/, freqtrade-fork/, claude-routines/skills/, freqtrade-config/).
+# Strategy + memory + discipline files are operator-curated; they reach the
+# VPS via `git pull` invoked manually by the operator after explicit review,
+# never via CI/CD.
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_environment:
+        description: "Target environment for the cockpit"
+        required: true
+        type: choice
+        options:
+          - paper
+          - live
+        default: paper
+      confirm_phase_9:
+        description: "Type YES_PHASE_9_GATE_GREEN to confirm walk-forward gate passed"
+        required: true
+        type: string
+      ref:
+        description: "Git ref to deploy (commit SHA or tag). Must have a phase-9-pass-* tag pointing at it."
+        required: true
+        type: string
+        default: main
+
+concurrency:
+  # One deploy at a time per environment. Don't cancel in-progress —
+  # mid-deploy cancellation could leave the VPS in a half-rsynced state.
+  group: deploy-cockpit-${{ github.event.inputs.target_environment }}
+  cancel-in-progress: false
+
+jobs:
+  # -------------------------------------------------------------------------
+  # Job 1 — Phase 9 gate guard. Runs FIRST and blocks all subsequent jobs.
+  # -------------------------------------------------------------------------
+  gate-check:
+    name: Phase 9 gate guard
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+
+    steps:
+      - name: Verify confirmation string
+        run: |
+          if [ "${{ github.event.inputs.confirm_phase_9 }}" != "YES_PHASE_9_GATE_GREEN" ]; then
+            echo "::error::Confirmation string mismatch. Operator must type YES_PHASE_9_GATE_GREEN exactly to acknowledge Iron Law 2."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref }}
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Verify deploy ref has a phase-9-pass-* annotated tag
+        run: |
+          # `git describe --exact-match` succeeds only if HEAD itself is
+          # the tagged commit. This prevents drifting deploys (operator
+          # tags v1.0 then deploys main, where main has uncommitted-yet-
+          # accidentally-tagged commits past v1.0).
+          if ! git describe --tags --match='phase-9-pass-*' --exact-match HEAD 2>/dev/null; then
+            echo "::error::Deploy ref ${{ github.event.inputs.ref }} is NOT pointed at by a phase-9-pass-* annotated tag."
+            echo "Operator must run: git tag -a phase-9-pass-vX.Y -m 'walk-forward 5/5 PASS' <commit> && git push --tags"
+            echo "before this workflow can deploy."
+            exit 1
+          fi
+          tag=$(git describe --tags --match='phase-9-pass-*' --exact-match HEAD)
+          echo "::notice::Phase 9 gate tag confirmed: $tag"
+
+      - name: Verify Phase 9 ADR exists
+        run: |
+          # The tag alone is too easy to add accidentally. The ADR forces
+          # the operator to articulate WHY Phase 9 passed (which strategy
+          # version, which fold metrics, what the gate evaluator output
+          # was). Stored under docs/decisions/ alongside ADR-001/002/003.
+          adr=$(ls docs/decisions/ 2>/dev/null | grep -iE 'phase[-_]?9[-_]?pass' || true)
+          if [ -z "$adr" ]; then
+            echo "::error::No Phase 9 pass ADR found under docs/decisions/."
+            echo "Expected pattern: docs/decisions/YYYY-MM-DD-NNN-phase-9-pass-vX.Y.md"
+            echo "ADR must contain: strategy_version, per-fold metrics table, gate evaluator stdout, operator sign-off."
+            exit 1
+          fi
+          echo "::notice::Phase 9 pass ADR found: $adr"
+
+  # -------------------------------------------------------------------------
+  # Job 2 — Re-run CI on the deploy ref. Don't trust historic CI status.
+  # -------------------------------------------------------------------------
+  ci-revalidate:
+    name: Re-validate CI on deploy ref
+    needs: gate-check
+    uses: ./.github/workflows/ci.yml
+    # Inheriting workflow_call from ci.yml requires ci.yml to expose `on:
+    # workflow_call`. If not yet wired, this job is a placeholder — the
+    # operator can copy the ci.yml jobs inline OR add `workflow_call` to
+    # ci.yml. For now this fails loud at run time as a forcing function
+    # to wire reusability before first real deploy.
+
+  # -------------------------------------------------------------------------
+  # Job 3 — Actually deploy. Only fires after both gates green.
+  # -------------------------------------------------------------------------
+  deploy:
+    name: Build + rsync + restart on VPS
+    needs: [gate-check, ci-revalidate]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment:
+      # GitHub Environment with manual approval requirement is layered on
+      # top of the gate-check + ci-revalidate guards. Operator must click
+      # "Review deployments" in the workflow run UI before this job starts.
+      # Configure under: Settings → Environments → cockpit-${target}.
+      name: cockpit-${{ github.event.inputs.target_environment }}
+      url: https://ai-trading.alisadikinma.com
+
+    env:
+      VPS_HOST: ${{ secrets.VPS_HOST }}        # 31.97.188.145
+      VPS_USER: ${{ secrets.VPS_USER }}        # claudesn
+      VPS_SSH_KNOWN: ${{ secrets.VPS_SSH_KNOWN_HOSTS }}  # output of `ssh-keyscan -H <vps-host>`
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref }}
+          submodules: recursive
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: dashboard-ui/package-lock.json
+
+      - name: Build dashboard-ui standalone
+        working-directory: dashboard-ui
+        run: |
+          npm ci
+          npm run build
+          # postbuild-standalone.mjs copies static + public into .next/standalone
+
+      - name: Install SSH deploy key
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          echo "${{ secrets.VPS_SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          # Pinned host key — refuse to connect if VPS host key changes
+          # (catches MITM + IP reuse). Generated once via:
+          #   ssh-keyscan -H 31.97.188.145 | base64 -w0
+          # then stored as VPS_SSH_KNOWN_HOSTS secret (base64-decoded here).
+          echo "$VPS_SSH_KNOWN" | base64 -d > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Rsync artifacts to VPS staging dir
+        run: |
+          # Push to staging dir; the deploy script swaps live↔staging atomically.
+          rsync -az --delete \
+            -e "ssh -i ~/.ssh/deploy_key -o UserKnownHostsFile=~/.ssh/known_hosts" \
+            dashboard-ui/.next/standalone/ \
+            "${VPS_USER}@${VPS_HOST}:~/ai-trading-staging/dashboard-ui/.next/standalone/"
+          rsync -az --delete \
+            -e "ssh -i ~/.ssh/deploy_key -o UserKnownHostsFile=~/.ssh/known_hosts" \
+            dashboard-ui/.next/static/ \
+            "${VPS_USER}@${VPS_HOST}:~/ai-trading-staging/dashboard-ui/.next/static/"
+          rsync -az --delete \
+            -e "ssh -i ~/.ssh/deploy_key -o UserKnownHostsFile=~/.ssh/known_hosts" \
+            dashboard-ui/public/ \
+            "${VPS_USER}@${VPS_HOST}:~/ai-trading-staging/dashboard-ui/public/"
+          rsync -az \
+            -e "ssh -i ~/.ssh/deploy_key -o UserKnownHostsFile=~/.ssh/known_hosts" \
+            pulse-bridge/ \
+            "${VPS_USER}@${VPS_HOST}:~/ai-trading-staging/pulse-bridge/" \
+            --exclude='__pycache__' --exclude='.pytest_cache' --exclude='*.egg-info'
+          rsync -az \
+            -e "ssh -i ~/.ssh/deploy_key -o UserKnownHostsFile=~/.ssh/known_hosts" \
+            infra/traefik/ai-trading.yml \
+            "${VPS_USER}@${VPS_HOST}:~/ai-trading-staging/infra/traefik/ai-trading.yml"
+          rsync -az \
+            -e "ssh -i ~/.ssh/deploy_key -o UserKnownHostsFile=~/.ssh/known_hosts" \
+            infra/migrations/ \
+            "${VPS_USER}@${VPS_HOST}:~/ai-trading-staging/infra/migrations/"
+
+      - name: Trigger VPS deploy script (restricted SSH key)
+        # The deploy key's authorized_keys entry on the VPS has
+        # `command="/home/claudesn/bin/deploy-cockpit.sh"` so this SSH
+        # invocation can ONLY run the deploy script — no shell access.
+        # Arguments are passed via SSH_ORIGINAL_COMMAND inside the script.
+        run: |
+          ssh -i ~/.ssh/deploy_key -o UserKnownHostsFile=~/.ssh/known_hosts \
+            "${VPS_USER}@${VPS_HOST}" \
+            "deploy ${{ github.event.inputs.target_environment }} ${{ github.event.inputs.ref }}"
+
+      - name: Smoke test live URL
+        run: |
+          # Wait up to 60s for the cockpit to be reachable. Health check
+          # against /login (always-200 public route) — no JWT needed.
+          for i in $(seq 1 12); do
+            code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 5 \
+              "https://ai-trading.alisadikinma.com/login" || echo "000")
+            if [ "$code" = "200" ]; then
+              echo "::notice::Smoke test PASS — /login returned 200 after ${i}*5s"
+              exit 0
+            fi
+            echo "Attempt $i: HTTP $code, retrying in 5s..."
+            sleep 5
+          done
+          echo "::error::Smoke test FAIL — /login did not return 200 within 60s"
+          echo "VPS deploy script should have rolled back. Verify by SSHing to VPS and checking systemctl status dashboard-ui pulse-bridge."
+          exit 1
+
+      - name: Cleanup deploy key
+        if: always()
+        run: rm -f ~/.ssh/deploy_key
