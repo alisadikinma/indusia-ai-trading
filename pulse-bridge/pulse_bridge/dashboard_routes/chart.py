@@ -75,6 +75,20 @@ class OhlcvPoint(BaseModel):
     volume: float
 
 
+# Maps API tf param to the source object. The 1m source is the raw
+# hypertable (filtered on tf='1m'); higher timeframes are TimescaleDB
+# continuous aggregates built in migration 007. Names are NOT user
+# input — strict whitelist guards against SQL injection at endpoint.
+_TF_SOURCES: dict[str, tuple[str, bool]] = {
+    "1m":  ("brain.ohlcv",     True),   # has tf column → filter
+    "5m":  ("brain.ohlcv_5m",  False),
+    "15m": ("brain.ohlcv_15m", False),
+    "1h":  ("brain.ohlcv_1h",  False),
+    "4h":  ("brain.ohlcv_4h",  False),
+    "1d":  ("brain.ohlcv_1d",  False),
+}
+
+
 @router.get("/ohlcv", response_model=list[OhlcvPoint])
 async def get_ohlcv(
     request: Request,
@@ -86,21 +100,32 @@ async def get_ohlcv(
 ) -> list[OhlcvPoint]:
     """Return up to `limit` OHLCV candles for `pair` / `tf` between `from`..`to`.
 
-    Empty array if no rows match — never raises (Iron Law 3 anti-placeholder requires
-    real Postgres query; empty result must come from a real 0-row query, never hardcoded).
+    `tf=1m` reads `brain.ohlcv` directly (raw hypertable). Higher timeframes
+    read continuous aggregates `brain.ohlcv_<tf>` built in migration 007.
+    Empty array if no rows match — never raises (Iron Law 3 anti-placeholder
+    requires real Postgres query; empty result must come from a real 0-row
+    query, never hardcoded).
+    """
+    if tf not in _TF_SOURCES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"unsupported tf={tf!r}; allowed: {sorted(_TF_SOURCES)}",
+        )
+    table, has_tf_col = _TF_SOURCES[tf]
+    where_tf = "AND tf = '1m'" if has_tf_col else ""
+    sql = f"""
+        SELECT ts, open, high, low, close, volume
+        FROM {table}
+        WHERE pair = $1
+          {where_tf}
+          AND ($2::timestamptz IS NULL OR ts >= $2)
+          AND ($3::timestamptz IS NULL OR ts <= $3)
+        ORDER BY ts DESC
+        LIMIT $4
     """
     pool = request.app.state.pg_pool
-    sql = """
-        SELECT ts, open, high, low, close, volume
-        FROM brain.ohlcv
-        WHERE pair = $1 AND tf = $2
-          AND ($3::timestamptz IS NULL OR ts >= $3)
-          AND ($4::timestamptz IS NULL OR ts <= $4)
-        ORDER BY ts DESC
-        LIMIT $5
-    """
     async with pool.acquire() as conn:
-        rows = await conn.fetch(sql, pair, tf, from_ts, to_ts, limit)
+        rows = await conn.fetch(sql, pair, from_ts, to_ts, limit)
     # Reverse so the chart consumer gets ascending time order.
     return [
         OhlcvPoint(
