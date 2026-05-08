@@ -138,9 +138,10 @@ jobs:
       url: https://ai-trading.alisadikinma.com
 
     env:
-      VPS_HOST: ${{ secrets.VPS_HOST }}        # 31.97.188.145
-      VPS_USER: ${{ secrets.VPS_USER }}        # claudesn
-      VPS_SSH_KNOWN: ${{ secrets.VPS_SSH_KNOWN_HOSTS }}  # output of `ssh-keyscan -H <vps-host>`
+      VPS_HOST: ${{ secrets.VPS_SSH_HOST }}            # 31.97.188.145
+      VPS_PORT: ${{ secrets.VPS_SSH_PORT }}            # 22 (default)
+      VPS_USER: ${{ secrets.VPS_SSH_USER }}            # claudesn
+      VPS_SSH_KNOWN: ${{ secrets.VPS_SSH_KNOWN_HOSTS }}  # base64 of `ssh-keyscan -H <vps-host>`
 
     steps:
       - uses: actions/checkout@v4
@@ -178,29 +179,25 @@ jobs:
       - name: Rsync artifacts to VPS staging dir
         run: |
           # Push to staging dir; the deploy script swaps live↔staging atomically.
-          rsync -az --delete \
-            -e "ssh -i ~/.ssh/deploy_key -o UserKnownHostsFile=~/.ssh/known_hosts" \
+          # SSH command shared by all rsync invocations (port + key + known_hosts).
+          SSH_CMD="ssh -i ~/.ssh/deploy_key -p ${VPS_PORT:-22} -o UserKnownHostsFile=~/.ssh/known_hosts"
+          rsync -az --delete -e "$SSH_CMD" \
             dashboard-ui/.next/standalone/ \
             "${VPS_USER}@${VPS_HOST}:~/ai-trading-staging/dashboard-ui/.next/standalone/"
-          rsync -az --delete \
-            -e "ssh -i ~/.ssh/deploy_key -o UserKnownHostsFile=~/.ssh/known_hosts" \
+          rsync -az --delete -e "$SSH_CMD" \
             dashboard-ui/.next/static/ \
             "${VPS_USER}@${VPS_HOST}:~/ai-trading-staging/dashboard-ui/.next/static/"
-          rsync -az --delete \
-            -e "ssh -i ~/.ssh/deploy_key -o UserKnownHostsFile=~/.ssh/known_hosts" \
+          rsync -az --delete -e "$SSH_CMD" \
             dashboard-ui/public/ \
             "${VPS_USER}@${VPS_HOST}:~/ai-trading-staging/dashboard-ui/public/"
-          rsync -az \
-            -e "ssh -i ~/.ssh/deploy_key -o UserKnownHostsFile=~/.ssh/known_hosts" \
+          rsync -az -e "$SSH_CMD" \
             pulse-bridge/ \
             "${VPS_USER}@${VPS_HOST}:~/ai-trading-staging/pulse-bridge/" \
             --exclude='__pycache__' --exclude='.pytest_cache' --exclude='*.egg-info'
-          rsync -az \
-            -e "ssh -i ~/.ssh/deploy_key -o UserKnownHostsFile=~/.ssh/known_hosts" \
+          rsync -az -e "$SSH_CMD" \
             infra/traefik/ai-trading.yml \
             "${VPS_USER}@${VPS_HOST}:~/ai-trading-staging/infra/traefik/ai-trading.yml"
-          rsync -az \
-            -e "ssh -i ~/.ssh/deploy_key -o UserKnownHostsFile=~/.ssh/known_hosts" \
+          rsync -az -e "$SSH_CMD" \
             infra/migrations/ \
             "${VPS_USER}@${VPS_HOST}:~/ai-trading-staging/infra/migrations/"
 
@@ -210,7 +207,8 @@ jobs:
         # invocation can ONLY run the deploy script — no shell access.
         # Arguments are passed via SSH_ORIGINAL_COMMAND inside the script.
         run: |
-          ssh -i ~/.ssh/deploy_key -o UserKnownHostsFile=~/.ssh/known_hosts \
+          ssh -i ~/.ssh/deploy_key -p "${VPS_PORT:-22}" \
+            -o UserKnownHostsFile=~/.ssh/known_hosts \
             "${VPS_USER}@${VPS_HOST}" \
             "deploy ${{ github.event.inputs.target_environment }} ${{ github.event.inputs.ref }}"
 

@@ -97,8 +97,9 @@ In GitHub UI: **Settings → Secrets and variables → Actions → New repositor
 
 | Secret | Value | Purpose |
 |---|---|---|
-| `VPS_HOST` | `31.97.188.145` | rsync + ssh target |
-| `VPS_USER` | `claudesn` | rsync + ssh user |
+| `VPS_SSH_HOST` | `31.97.188.145` | rsync + ssh target |
+| `VPS_SSH_PORT` | `22` | SSH port (default 22; override here if firewall remap) |
+| `VPS_SSH_USER` | `claudesn` | rsync + ssh user |
 | `VPS_SSH_PRIVATE_KEY` | content of `~/.ssh/deploy_key` from step 1 | SSH auth (restricted-command key) |
 | `VPS_SSH_KNOWN_HOSTS` | base64 of `ssh-keyscan -H 31.97.188.145` from step 1 | Pin VPS host key (MITM defense) |
 
