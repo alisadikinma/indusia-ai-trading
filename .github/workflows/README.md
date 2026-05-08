@@ -5,7 +5,7 @@ Two workflows, jobhunter pattern (auto-deploy on push):
 - **`ci.yml`** — runs on every push & PR to `main`. Postgres + TimescaleDB service, applies init.sql + all migrations, runs pytest. Frontend job runs `tsc --noEmit` + `npm run lint`. **No deploy gate** — runs in parallel with deploy.yml.
 - **`deploy.yml`** — runs on every push to `main` (and manual dispatch). SSHes into the VPS and runs `infra/scripts/deploy.sh`, which:
   1. `git fetch + reset --hard origin/main`
-  2. Apply pending DB migrations (idempotent — `CREATE TABLE IF NOT EXISTS` pattern)
+  2. Apply ALL `infra/migrations/0*.sql` (idempotent — `CREATE * IF NOT EXISTS` + `DO/EXCEPT` patterns). Any psql failure with `ON_ERROR_STOP=1` aborts the deploy with a clear message — no silent swallow.
   3. `npm ci && npm run build` for `dashboard-ui` (Next.js standalone)
   4. Refresh `pulse-bridge` venv (`pip install -e pulse-bridge`)
   5. Drop `infra/traefik/ai-trading.yml` to `/opt/n8n/traefik/dynamic/` (Traefik file-watch auto-reloads)

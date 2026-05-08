@@ -13,7 +13,9 @@
 # Iron Law boundary: this script deploys the COCKPIT only. It does NOT touch:
 #   - crypto-bot/ (claude-routines, freqtrade-config) — operator-curated
 #   - freqtrade-fork/ — submodule, separate manual update
-#   - infra/migrations/00[0-5]_*.sql — already-applied, never re-run
+#   - infra/migrations/0*.sql are all re-applied each deploy. Each one is
+#     idempotent (CREATE TABLE IF NOT EXISTS, DO/EXCEPT for policies).
+#     Iron Law 4 still forbids EDITING already-committed migrations.
 #   - ~/.ai-trading/.env — secrets, operator-managed
 #
 # Invocation:
@@ -60,22 +62,26 @@ fi
 set -a
 source "$ENV_FILE"
 set +a
-export PGPASSWORD="${PG_PASS:-}"
+# `:?` aborts with a clear message if PG_PASS is unset OR empty.
+# Iron Law 3 — no silent fallback to passwordless psql even on peer-auth hosts.
+export PGPASSWORD="${PG_PASS:?PG_PASS must be set in $ENV_FILE}"
 
 # ---- 2. Apply pending migrations (idempotent) --------------------------------
-# CREATE TABLE IF NOT EXISTS pattern means already-applied migrations are no-op.
-# Iron Law 4: applied migrations themselves must NEVER be edited; only NEW
-# migrations (007+) get added. This loop applies all 0*.sql which is safe.
+# All 0*.sql are idempotent (CREATE * IF NOT EXISTS, DO/EXCEPT for policies).
+# ON_ERROR_STOP=1 makes psql exit non-zero on first SQL error; we bubble that
+# up instead of grep-sniffing output (which silently passed real errors before).
 echo "▶ Apply pending DB migrations"
 for m in infra/migrations/0*.sql; do
   [ -f "$m" ] || continue
   name=$(basename "$m")
-  if psql -h 127.0.0.1 -U "${PG_USER:-trader}" -d "${PG_DB:-trading}" \
-       -v ON_ERROR_STOP=1 -f "$m" 2>&1 | tail -3 | grep -qE 'ERROR|FATAL'; then
-    echo "  ⚠ $name returned errors — may be already-applied; check manually if unexpected"
-  else
-    echo "  ✓ $name"
+  if ! psql -h 127.0.0.1 -U "${PG_USER:-trader}" -d "${PG_DB:-trading}" \
+            -v ON_ERROR_STOP=1 -f "$m"; then
+    echo "❌ migration failed: $name — aborting deploy (Iron Law 4: never re-edit a"
+    echo "   committed migration; if this is a duplicate-object error on re-run,"
+    echo "   wrap the offending DDL in CREATE * IF NOT EXISTS / DO/EXCEPT before retrying)."
+    exit 1
   fi
+  echo "  ✓ $name"
 done
 unset PGPASSWORD
 

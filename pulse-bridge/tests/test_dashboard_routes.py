@@ -147,6 +147,26 @@ async def test_chart_limit_capped(
         assert r.status_code == 422
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("bad_tf", ["2m", "30m", "8h", "1w", "xyz", "1M"])
+async def test_chart_unsupported_tf_returns_400(
+    app_client: AsyncClient, auth_headers: dict[str, str], bad_tf: str
+) -> None:
+    """tf must be from the whitelist {1m, 5m, 15m, 1h, 4h, 1d}; anything else
+    raises 400 with the allow-list. Closes the SQL-injection vector by ensuring
+    no user-supplied string flows into the dynamic table-name interpolation."""
+    r = await app_client.get(
+        "/dashboard/chart/ohlcv",
+        params={"pair": "BTC/USDT", "tf": bad_tf, "limit": 5},
+        headers=auth_headers,
+    )
+    assert r.status_code == 400
+    detail = r.json().get("detail", "")
+    assert "unsupported tf" in detail.lower()
+    # Allow-list must be advertised so the operator can self-correct.
+    assert "1m" in detail and "1d" in detail
+
+
 # ---------------------------------------------------------------------------
 # /dashboard/journal
 # ---------------------------------------------------------------------------
