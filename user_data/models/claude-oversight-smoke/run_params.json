@@ -1,0 +1,42 @@
+{
+    "freqai": {
+        "enabled": true,
+        "identifier": "claude-oversight-smoke",
+        "train_period_days": 639,
+        "backtest_period_days": 92,
+        "live_retrain_hours": 24,
+        "feature_parameters": {
+            "include_corr_pairlist": [],
+            "label_period_candles": 16,
+            "include_shifted_candles": 2,
+            "DI_threshold": 0.9,
+            "weight_factor": 0.9,
+            "principal_component_analysis": false,
+            "use_SVM_to_remove_outliers": false,
+            "stratify_training_data": 0,
+            "indicator_periods_candles": [
+                10,
+                20
+            ]
+        },
+        "data_split_parameters": {
+            "test_size": 0.25,
+            "shuffle": false,
+            "random_state": 42
+        },
+        "model_training_parameters": {
+            "n_estimators": 200,
+            "max_depth": 6,
+            "learning_rate": 0.05,
+            "verbosity": 0,
+            "n_jobs": -1
+        }
+    },
+    "timeframe": "15m",
+    "stake_amount": null,
+    "stake_currency": null,
+    "max_open_trades": null,
+    "pairs": [
+        "BTC/USDT"
+    ]
+}
