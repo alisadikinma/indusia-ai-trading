@@ -55,7 +55,11 @@ if [ ! -f "$ENV_FILE" ]; then
   exit 1
 fi
 # shellcheck disable=SC1090
+# `set -a` exports every var sourced — required so `npm run build` (child proc)
+# inherits NEXT_PUBLIC_* + DASHBOARD_* keys for build-time inlining.
+set -a
 source "$ENV_FILE"
+set +a
 export PGPASSWORD="${PG_PASS:-}"
 
 # ---- 2. Apply pending migrations (idempotent) --------------------------------
