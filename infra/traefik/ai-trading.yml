@@ -75,7 +75,9 @@ http:
     ai-trading-ui:
       loadBalancer:
         servers:
-          - url: "http://127.0.0.1:3000"
+          # 172.17.0.1 = docker bridge gateway = VPS host as seen from
+          # the Traefik container (matches portfolio.yml convention on this VPS).
+          - url: "http://172.17.0.1:3000"
         # Health check: Next.js standalone responds 200 on /login (public route).
         # Tune passHostHeader=true so Server Components see the public hostname
         # for cookie sameSite + secure flag derivation.
@@ -84,5 +86,5 @@ http:
     ai-trading-api:
       loadBalancer:
         servers:
-          - url: "http://127.0.0.1:8081"
+          - url: "http://172.17.0.1:8081"
         passHostHeader: true
