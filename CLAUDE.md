@@ -8,6 +8,19 @@ This is a **mono-repo for two trading bots** per [ADR-001](docs/decisions/2026-0
 
 ---
 
+## 🧠 Vault Context Link
+
+Pre-read via `obsidian` MCP `search-vault` saat butuh konteks lintas-sesi (e.g., "what did we decide about Blofin", "last regime classifier outcome").
+
+Reference shared:
+- `10-Identity/ali.md` — voice & risk tolerance (auto-loaded)
+- `10-Identity/tech-preferences.md` — stack decisions
+- `30-Knowledge/` — search topical: trading, backtest, ADR history
+
+Belum ada vault folder `20-Projects/AI-Trading/`. Kalau ada decision atau insight penting (regime call, ADR change, postmortem), propose ke user buat README di sana via `obsidian` MCP `create-note`.
+
+---
+
 ## Project Goal
 
 Build a 24/7 autonomous AI crypto trading agent that:
