@@ -84,3 +84,6 @@ infra/data_loader/.cache/
 
 # Runtime logs (freqtrade.service writes /opt/ai-trading/logs/freqtrade.log; same path locally)
 logs/
+
+# graphify generated output
+graphify-out/
